@@ -7,6 +7,7 @@ RUN go mod download
 
 COPY . .
 
+RUN rm go.sum
 RUN go build -o hello .
 
 FROM alpine:latest
