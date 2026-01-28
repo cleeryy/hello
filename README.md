@@ -1,7 +1,7 @@
 # 🌙 hello
 
 [![Build and Push Docker Image to GHCR](https://github.com/cleeryy/hello/actions/workflows/docker-build.yml/badge.svg)](https://github.com/cleeryy/hello/actions/workflows/docker-build.yml)
-[![Go Version](https://img.shields.io/badge/Go-1.21-blue.svg)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.25-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 A simple, fast, and containerized **wake on lan** built with Go and Gin framework. Send magic packets to wake up your devices over the network with ease.
@@ -18,7 +18,7 @@ A simple, fast, and containerized **wake on lan** built with Go and Gin framewor
 ## 📋 Prerequisites
 
 - **Docker** (for containerized deployment)
-- **Go 1.21+** (for local development)
+- **Go 1.25+** (for local development)
 - Network access to devices you want to wake
 
 ## 🚀 Quick Start
