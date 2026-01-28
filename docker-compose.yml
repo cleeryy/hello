@@ -1,0 +1,9 @@
+---
+services:
+  hello:
+    image: ghcr.io/cleeryy/hello:latest
+    ports:
+    - "8080:8080"
+    environment:
+      DEFAULT_MAC: "AA:BB:CC:DD:EE:FF"
+    restart: unless-stopped
