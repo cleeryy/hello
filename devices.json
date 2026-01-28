@@ -1,0 +1,20 @@
+[
+  {
+    "id": "device2",
+    "name": "Google DNS",
+    "mac": "AA:BB:CC:DD:EE:FF",
+    "status": "up",
+    "ip": "8.8.8.8",
+    "ping_enabled": true,
+    "last_seen": 1762163444
+  },
+  {
+    "id": "device3",
+    "name": "Cloudflare",
+    "mac": "11:22:33:44:55:66",
+    "status": "unknown",
+    "ip": "1.1.1.1",
+    "ping_enabled": false,
+    "last_seen": 0
+  }
+]

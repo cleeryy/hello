@@ -1,4 +1,4 @@
-package main
+package wol
 
 import (
 	"github.com/linde12/gowol"
