@@ -1,21 +1,26 @@
+# Build stage
 FROM golang:1.25.3-alpine AS builder
+
 WORKDIR /app
 
-COPY go.mod go.sum .
-
+# Only module files first to leverage Docker layer cache
+COPY go.mod go.sum ./
 RUN go mod download
 
+# Now copy the rest of the source code
 COPY . .
 
-RUN go mod tidy
+# Tidy modules and build the binary in one layer
+RUN go mod tidy && \
+    go build -o hello .
 
-RUN go build -o hello .
-
-FROM alpine:latest
+# Runtime stage
+FROM alpine:3.18
 
 WORKDIR /root/
 
-COPY --from=0 /app/hello /root/hello
+# Copy the built binary from the named builder stage
+COPY --from=builder /app/hello /root/hello
 
 EXPOSE 8080
 
