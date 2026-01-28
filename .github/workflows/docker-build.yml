@@ -23,10 +23,12 @@ jobs:
       - name: Lint Dockerfile with Hadolint
         id: hadolint
         uses: hadolint/hadolint-action@v3.1.0
-        continue-on-error: true  # TEMP: allow pipeline to continue while fixing Dockerfile
+        # TEMP: let the pipeline continue even if there are Dockerfile issues
+        continue-on-error: true
         with:
           dockerfile: ./Dockerfile
           failure-threshold: error
+          format: tty
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -45,12 +47,13 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/hello:latest
             ghcr.io/${{ github.repository_owner }}/hello:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # cache-from/to removed because the default `docker` driver
+          # on GitHub-hosted runners does not support gha cache export.
 
       - name: Scan image with Trivy
         id: trivy_scan
         uses: aquasecurity/trivy-action@0.28.0
+        if: success() && steps.build.outcome == 'success'
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/hello:${{ github.sha }}
           format: 'sarif'
@@ -58,13 +61,13 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          exit-code: '0'  # don't fail job yet; switch to 1 once you're happy
+          exit-code: '0'  # change to '1' later to fail on vulns
         env:
           TRIVY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
-        if: always() && steps.trivy_scan.outcome != 'skipped'
+        if: always() && steps.trivy_scan.outcome == 'success'
         with:
           sarif_file: 'trivy-results.sarif'
           checkout_path: ${{ github.workspace }}
