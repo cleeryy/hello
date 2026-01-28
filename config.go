@@ -1,27 +1,25 @@
 package main
 
 import (
-	"log"
-	"os"
+    "fmt"
+    "log"
+    "os"
 
-	"github.com/joho/godotenv"
+    "github.com/joho/godotenv"
 )
 
-type Config struct {
-	DefaultMAC string
-}
-
 func LoadConfig() (*Config, error) {
-	
-	godotenv.Load()
+    if err := godotenv.Load(); err != nil {
+        log.Printf("warning: could not load .env file: %v", err)
+    }
 
-	config := &Config{
-		DefaultMAC : os.Getenv("DEFAULT_MAC"),
-	} 
+    config := &Config{
+        DefaultMAC: os.Getenv("DEFAULT_MAC"),
+    }
 
-	if config.DefaultMAC == "" {
-		log.Fatal("not default mac address found.")
-	}
+    if config.DefaultMAC == "" {
+        return nil, fmt.Errorf("default MAC address not found (DEFAULT_MAC)")
+    }
 
-	return config, nil
+    return config, nil
 }
