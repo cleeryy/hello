@@ -4,7 +4,7 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /app
 
 # Only module files first to leverage Docker layer cache
-COPY go.mod go.sum ./
+COPY go.mod ./
 RUN go mod download
 
 # Now copy the rest of the source code
