@@ -8,6 +8,10 @@ import (
     "github.com/joho/godotenv"
 )
 
+type Config struct {
+	DefaultMAC string
+}
+
 func LoadConfig() (*Config, error) {
     if err := godotenv.Load(); err != nil {
         log.Printf("warning: could not load .env file: %v", err)
