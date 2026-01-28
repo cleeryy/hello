@@ -23,8 +23,6 @@ jobs:
       - name: Lint Dockerfile with Hadolint
         id: hadolint
         uses: hadolint/hadolint-action@v3.1.0
-        # TEMP: let the pipeline continue even if there are Dockerfile issues
-        continue-on-error: true
         with:
           dockerfile: ./Dockerfile
           failure-threshold: error
@@ -47,8 +45,6 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/hello:latest
             ghcr.io/${{ github.repository_owner }}/hello:${{ github.sha }}
-          # cache-from/to removed because the default `docker` driver
-          # on GitHub-hosted runners does not support gha cache export.
 
       - name: Scan image with Trivy
         id: trivy_scan
@@ -61,7 +57,7 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          exit-code: '0'  # change to '1' later to fail on vulns
+          exit-code: '1'  # NOW: fail job on HIGH/CRITICAL
         env:
           TRIVY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
