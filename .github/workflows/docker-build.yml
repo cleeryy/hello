@@ -48,7 +48,7 @@ jobs:
 
       - name: Scan image with Trivy
         id: trivy_scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         if: success() && steps.build.outcome == 'success'
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/hello:${{ github.sha }}
