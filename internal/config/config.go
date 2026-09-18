@@ -18,6 +18,9 @@ type Config struct {
 	BroadcastIP     string
 	DevicesFile     string
 	MonitorInterval time.Duration
+	// APIToken locks the API behind Bearer auth. Empty means open
+	// mode: convenient locally, never for an exposed server.
+	APIToken string
 }
 
 const (
@@ -39,6 +42,7 @@ func LoadConfig() (*Config, error) {
 		BroadcastIP:     envOr("BROADCAST_IP", defaultBroadcastIP),
 		DevicesFile:     envOr("DEVICES_FILE", defaultDevicesFile),
 		MonitorInterval: monitorInterval(),
+		APIToken:        os.Getenv("API_TOKEN"),
 	}
 
 	if cfg.DefaultMAC == "" {

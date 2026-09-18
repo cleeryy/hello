@@ -18,8 +18,14 @@ func TestEmbeddedSpec(t *testing.T) {
 			Version string `yaml:"version"`
 		} `yaml:"info"`
 		Paths      map[string]map[string]any `yaml:"paths"`
+		Security   []map[string]any          `yaml:"security"`
 		Components struct {
-			Schemas map[string]any `yaml:"schemas"`
+			Schemas         map[string]any `yaml:"schemas"`
+			SecuritySchemes map[string]struct {
+				Type   string `yaml:"type"`
+				Scheme string `yaml:"scheme"`
+			} `yaml:"securitySchemes"`
+			Responses map[string]any `yaml:"responses"`
 		} `yaml:"components"`
 	}
 	require.NoError(t, yaml.Unmarshal(YAML, &doc))
@@ -49,4 +55,49 @@ func TestEmbeddedSpec(t *testing.T) {
 		require.Contains(t, doc.Components.Schemas, s, "schema %s défini", s)
 	}
 	require.Contains(t, string(YAML), "application/problem+json")
+}
+
+// Given: le document embarqué
+// When: on inspecte sa sécurité
+// Then: bearerAuth global, 401 sur les opérations protégées, exemptions publiques.
+func TestEmbeddedSpecSecurity(t *testing.T) {
+	var doc struct {
+		Security   []map[string]any          `yaml:"security"`
+		Paths      map[string]map[string]any `yaml:"paths"`
+		Components struct {
+			SecuritySchemes map[string]struct {
+				Type   string `yaml:"type"`
+				Scheme string `yaml:"scheme"`
+			} `yaml:"securitySchemes"`
+			Responses map[string]any `yaml:"responses"`
+		} `yaml:"components"`
+	}
+	require.NoError(t, yaml.Unmarshal(YAML, &doc))
+
+	require.Len(t, doc.Security, 1, "sécurité globale définie")
+	require.Contains(t, doc.Security[0], "bearerAuth")
+	scheme, ok := doc.Components.SecuritySchemes["bearerAuth"]
+	require.True(t, ok, "scheme bearerAuth défini")
+	require.Equal(t, "http", scheme.Type)
+	require.Equal(t, "bearer", scheme.Scheme)
+	require.Contains(t, doc.Components.Responses, "Unauthorized")
+
+	public := map[string]bool{"/": true, "/health": true, "/openapi.yaml": true, "/docs": true}
+	for path, ops := range doc.Paths {
+		for method, raw := range ops {
+			op, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			responses, _ := op["responses"].(map[string]any)
+			if public[path] {
+				require.NotContains(t, responses, "401", "%s %s public sans 401", method, path)
+				continue
+			}
+			if method == "parameters" {
+				continue
+			}
+			require.Contains(t, responses, "401", "%s %s protégé documente 401", method, path)
+		}
+	}
 }

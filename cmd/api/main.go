@@ -35,6 +35,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if cfg.APIToken == "" {
+		slog.Warn("API_TOKEN unset: API runs open, set a token before exposing it")
+	}
 
 	store := storage.New(cfg.DevicesFile)
 

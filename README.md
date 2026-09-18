@@ -163,8 +163,20 @@ replacement, `DELETE` returns `204 No Content`.
 | `BROADCAST_IP`        | no       | `255.255.255.255` | Subnet broadcast for magic packets |
 | `DEVICES_FILE`        | no       | `devices.json`    | Device registry file               |
 | `MONITOR_INTERVAL_SEC`| no       | `30`              | Status poll interval in seconds    |
+| `API_TOKEN`           | no       | *(open mode)*     | Bearer token locking the API       |
 
 Or create a `.env` file in the project root (see `.env.example`).
+
+## Authentication
+
+Set `API_TOKEN` to lock every route behind `Authorization: Bearer <token>`.
+Without it the server runs open — fine on localhost, never expose that.
+`GET /health`, `/`, `/docs`, and `/openapi.yaml` stay public so probes and
+docs keep working; browsers calling `/ws` pass `?token=` instead of a header.
+
+```bash
+curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8080/devices
+```
 
 ## Project Structure
 
@@ -190,7 +202,7 @@ hello/
 
 ## Built With
 
-- **[Go 1.25](https://golang.org/)** - Programming language
+- **[Go 1.26](https://golang.org/)** - Programming language
 - **[Gin](https://gin-gonic.com/)** - Web framework
 - **[gowol](https://github.com/linde12/gowol)** - Wake-on-LAN implementation
 - **[godotenv](https://github.com/joho/godotenv)** - .env file loader

@@ -33,24 +33,27 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, store *storage.Storage, h
 	New(cfg, store, hub).Mount(r)
 }
 
-// Mount registers every route.
+// Mount registers every route. Docs, welcome, and health stay public;
+// everything else requires the API token when one is configured.
 func (s *Server) Mount(r *gin.Engine) {
 	r.Use(securityHeaders())
 	r.GET("/", s.welcome)
 	r.GET("/health", s.health)
 	r.GET("/docs", s.docs)
 	r.GET("/openapi.yaml", s.openAPI)
-	r.GET("/ws", wshub.Handler(s.hub))
-	r.POST("/wake", s.wakeDefault)
-	r.GET("/wake", s.wakeDefault)
-	r.POST("/wake/:macAddress", s.wakeMAC)
-	r.GET("/wake/:macAddress", s.wakeMAC)
-	r.GET("/devices", s.listDevices)
-	r.POST("/devices", s.createDevice)
-	r.GET("/devices/:id", s.getDevice)
-	r.PUT("/devices/:id", s.updateDevice)
-	r.DELETE("/devices/:id", s.deleteDevice)
-	r.POST("/devices/:id/wake", s.wakeDevice)
+
+	guarded := r.Group("/", requireToken(s.cfg.APIToken))
+	guarded.GET("/ws", wshub.Handler(s.hub))
+	guarded.POST("/wake", s.wakeDefault)
+	guarded.GET("/wake", s.wakeDefault)
+	guarded.POST("/wake/:macAddress", s.wakeMAC)
+	guarded.GET("/wake/:macAddress", s.wakeMAC)
+	guarded.GET("/devices", s.listDevices)
+	guarded.POST("/devices", s.createDevice)
+	guarded.GET("/devices/:id", s.getDevice)
+	guarded.PUT("/devices/:id", s.updateDevice)
+	guarded.DELETE("/devices/:id", s.deleteDevice)
+	guarded.POST("/devices/:id/wake", s.wakeDevice)
 }
 
 func (s *Server) welcome(c *gin.Context) {

@@ -9,6 +9,8 @@ info:
 servers:
   - url: http://localhost:8080
     description: Local development
+security:
+  - bearerAuth: []
 tags:
   - name: System
     description: Health and machine-readable documentation
@@ -22,6 +24,7 @@ paths:
       tags: [System]
       summary: Welcome
       operationId: welcome
+      security: []
       responses:
         '200':
           description: Service banner
@@ -34,6 +37,7 @@ paths:
       tags: [System]
       summary: Health check
       operationId: health
+      security: []
       responses:
         '200':
           description: Service is up
@@ -46,6 +50,7 @@ paths:
       tags: [System]
       summary: This OpenAPI document
       operationId: openapi
+      security: []
       responses:
         '200':
           description: OpenAPI 3.1 YAML
@@ -58,6 +63,7 @@ paths:
       tags: [System]
       summary: Swagger UI
       operationId: docs
+      security: []
       responses:
         '200':
           description: Interactive documentation page
@@ -84,6 +90,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /wake:
     post:
       tags: [Wake]
@@ -97,6 +105,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WakeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalError'
     get:
@@ -113,6 +123,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WakeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalError'
   /wake/{macAddress}:
@@ -131,6 +143,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WakeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
@@ -148,6 +162,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WakeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
@@ -165,6 +181,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     post:
       tags: [Devices]
       summary: Register a device
@@ -193,6 +211,8 @@ paths:
                 $ref: '#/components/schemas/Device'
         '409':
           $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
   /devices/{id}:
@@ -209,6 +229,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
     put:
@@ -232,6 +254,8 @@ paths:
                 $ref: '#/components/schemas/Device'
         '404':
           $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
     delete:
@@ -241,6 +265,8 @@ paths:
       responses:
         '204':
           description: Deleted, empty body
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
   /devices/{id}/wake:
@@ -258,6 +284,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WakeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -444,3 +472,14 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid bearer token, RFC 9457 body
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API token from API_TOKEN. Browsers calling /ws use ?token= instead.
