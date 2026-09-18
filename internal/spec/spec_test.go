@@ -26,8 +26,11 @@ func TestEmbeddedSpec(t *testing.T) {
 	require.Equal(t, "3.1.0", doc.OpenAPI)
 	require.Equal(t, "hello", doc.Info.Title)
 	require.NotEmpty(t, doc.Info.Version)
-	for _, p := range []string{"/", "/health", "/ws", "/wake", "/wake/{macAddress}",
-		"/devices", "/devices/{id}", "/devices/{id}/wake", "/openapi.yaml", "/docs"} {
+	paths := []string{
+		"/", "/health", "/ws", "/wake", "/wake/{macAddress}",
+		"/devices", "/devices/{id}", "/devices/{id}/wake", "/openapi.yaml", "/docs",
+	}
+	for _, p := range paths {
 		ops, ok := doc.Paths[p]
 		require.True(t, ok, "route %s documentée", p)
 		require.NotEmpty(t, ops, "route %s a au moins une opération", p)

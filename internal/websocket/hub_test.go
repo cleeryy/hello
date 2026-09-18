@@ -40,7 +40,7 @@ func Test_Hub_broadcasts_status_to_subscriber(t *testing.T) {
 
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "/ws"), nil)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// When
 	hub.Broadcast(models.Device{

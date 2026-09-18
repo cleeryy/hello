@@ -1,24 +1,34 @@
 package ping
 
 import (
+	"context"
 	"net"
+	"os/exec"
+	"runtime"
+	"strconv"
 	"time"
-
-	goping "github.com/go-ping/ping"
 )
 
 // PingICMP reports whether ipAddress answers a single ICMP echo request.
+// It delegates to the operating system's ping binary, which owns the raw
+// socket privileges, instead of a third-party Go implementation.
 func PingICMP(ipAddress string, timeout time.Duration) bool {
-	pinger, err := goping.NewPinger(ipAddress)
-	if err != nil {
+	if ipAddress == "" {
 		return false
 	}
-	pinger.Count = 1
-	pinger.Timeout = timeout
-	if err := pinger.Run(); err != nil {
-		return false
+	secs := max(1, int(timeout.Seconds()))
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		args = []string{"-c", "1", "-t", strconv.Itoa(secs), ipAddress}
+	case "windows":
+		args = []string{"-n", "1", "-w", strconv.Itoa(int(timeout.Milliseconds())), ipAddress}
+	default: // linux, busybox, and friends
+		args = []string{"-c", "1", "-W", strconv.Itoa(secs), ipAddress}
 	}
-	return pinger.Statistics().PacketsRecv > 0
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+2*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "ping", args...).Run() == nil
 }
 
 // PingTCP reports whether ipAddress accepts TCP on a well-known port.

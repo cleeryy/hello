@@ -30,7 +30,7 @@ func TestSecurityHeaders_whenHealthRequested(t *testing.T) {
 
 	// Then: baseline security headers are present.
 	res := rec.Result()
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	require.Equal(t, "nosniff", res.Header.Get("X-Content-Type-Options"))
 	require.Equal(t, "DENY", res.Header.Get("X-Frame-Options"))
 	require.Equal(t, "no-referrer", res.Header.Get("Referrer-Policy"))
