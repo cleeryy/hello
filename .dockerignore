@@ -1,0 +1,7 @@
+wol-api
+hello
+*.test
+*.out
+coverage.*
+.env
+devices.json

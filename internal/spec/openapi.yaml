@@ -1,0 +1,446 @@
+openapi: 3.1.0
+info:
+  title: hello
+  version: 1.0.0
+  description: Wake-on-LAN registry with live presence. Send magic packets, track
+    devices, and subscribe to status changes over WebSocket.
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: System
+    description: Health and machine-readable documentation
+  - name: Wake
+    description: Send magic packets
+  - name: Devices
+    description: Device registry (full replacement on PUT, see operation notes)
+paths:
+  /:
+    get:
+      tags: [System]
+      summary: Welcome
+      operationId: welcome
+      responses:
+        '200':
+          description: Service banner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Welcome'
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      operationId: health
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /openapi.yaml:
+    get:
+      tags: [System]
+      summary: This OpenAPI document
+      operationId: openapi
+      responses:
+        '200':
+          description: OpenAPI 3.1 YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /docs:
+    get:
+      tags: [System]
+      summary: Swagger UI
+      operationId: docs
+      responses:
+        '200':
+          description: Interactive documentation page
+          content:
+            text/html:
+              schema:
+                type: string
+  /ws:
+    get:
+      tags: [System]
+      summary: Live status stream
+      description: >-
+        WebSocket upgrade. The server pushes a StatusChange message every time
+        the background monitor observes a reachability change. Clients should
+        answer ping frames with pong; idle connections are closed after 60s
+        without pong.
+      operationId: liveStatus
+      responses:
+        '101':
+          description: Switching protocols, status stream starts
+        '426':
+          description: Upgrade required, use a WebSocket client
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /wake:
+    post:
+      tags: [Wake]
+      summary: Wake the default device
+      description: Canonical endpoint. Sends a magic packet to DEFAULT_MAC.
+      operationId: wakeDefault
+      responses:
+        '200':
+          description: Magic packet sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeResult'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Wake]
+      summary: Wake the default device (legacy)
+      deprecated: true
+      description: Kept for backward compatibility. Prefer POST /wake because GET
+        must not trigger side effects.
+      operationId: wakeDefaultLegacy
+      responses:
+        '200':
+          description: Magic packet sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeResult'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /wake/{macAddress}:
+    parameters:
+      - $ref: '#/components/parameters/MacAddress'
+    post:
+      tags: [Wake]
+      summary: Wake a device by MAC
+      description: Canonical endpoint. Prefer over GET for the same reason as
+        POST /wake.
+      operationId: wakeMAC
+      responses:
+        '200':
+          description: Magic packet sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeResult'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Wake]
+      summary: Wake a device by MAC (legacy)
+      deprecated: true
+      description: Kept for backward compatibility. Prefer POST.
+      operationId: wakeMACLegacy
+      responses:
+        '200':
+          description: Magic packet sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeResult'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /devices:
+    get:
+      tags: [Devices]
+      summary: List devices
+      description: Unpaginated. The registry is local and small by design.
+      operationId: listDevices
+      responses:
+        '200':
+          description: Current registry snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceList'
+    post:
+      tags: [Devices]
+      summary: Register a device
+      operationId: createDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceInput'
+            examples:
+              withPing:
+                summary: Monitored host
+                value:
+                  id: pc-salon
+                  name: PC Salon
+                  mac: 00:11:22:33:44:55
+                  ip: 192.168.1.50
+                  ping_enabled: true
+      responses:
+        '201':
+          description: Device registered, echo of the stored representation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /devices/{id}:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [Devices]
+      summary: Get a device
+      operationId: getDevice
+      responses:
+        '200':
+          description: Stored representation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Devices]
+      summary: Replace a device
+      description: Full replacement. The path id wins over any id in the body.
+        Omitted fields reset to defaults (status defaults to unknown).
+      operationId: updateDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceInput'
+      responses:
+        '200':
+          description: Stored representation after replacement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Devices]
+      summary: Delete a device
+      operationId: deleteDevice
+      responses:
+        '204':
+          description: Deleted, empty body
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /devices/{id}/wake:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    post:
+      tags: [Devices]
+      summary: Wake a registered device
+      description: Looks the device up by id, then sends a magic packet to its MAC.
+      operationId: wakeDevice
+      responses:
+        '200':
+          description: Magic packet sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  parameters:
+    MacAddress:
+      name: macAddress
+      in: path
+      required: true
+      description: Colon- or hyphen-separated MAC-48
+      schema:
+        type: string
+        pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+        example: AA:BB:CC:DD:EE:FF
+    DeviceId:
+      name: id
+      in: path
+      required: true
+      description: Registry identifier, trimmed on write
+      schema:
+        type: string
+        minLength: 1
+        example: pc-salon
+  schemas:
+    Device:
+      type: object
+      required: [id, name, mac, status, ping_enabled, last_seen]
+      properties:
+        id:
+          type: string
+          example: pc-salon
+        name:
+          type: string
+          example: PC Salon
+        mac:
+          type: string
+          pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+          example: 00:11:22:33:44:55
+        status:
+          $ref: '#/components/schemas/DeviceStatus'
+        ip:
+          type: string
+          format: ipv4
+          example: 192.168.1.50
+        ping_enabled:
+          type: boolean
+          description: Whether the background monitor pings this device
+        last_seen:
+          type: integer
+          format: int64
+          description: Unix timestamp of the last up observation, 0 if never
+      additionalProperties: false
+    DeviceInput:
+      type: object
+      required: [id, name, mac]
+      description: Same shape as Device. status defaults to unknown when absent
+        or empty; PUT ignores body id in favor of the path id.
+      properties:
+        id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        mac:
+          type: string
+          pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+        status:
+          $ref: '#/components/schemas/DeviceStatus'
+        ip:
+          type: string
+          format: ipv4
+        ping_enabled:
+          type: boolean
+        last_seen:
+          type: integer
+          format: int64
+      additionalProperties: false
+    DeviceStatus:
+      type: string
+      enum: [up, down, unknown]
+    DeviceList:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+      additionalProperties: false
+    Welcome:
+      type: object
+      required: [message, defaultMac]
+      properties:
+        message:
+          type: string
+          example: welcome to the hello api!
+        defaultMac:
+          type: string
+          example: 00:11:22:33:44:55
+      additionalProperties: false
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+      additionalProperties: false
+    WakeResult:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: magic packet sent to AA:BB:CC:DD:EE:FF !
+      additionalProperties: false
+    StatusChange:
+      type: object
+      description: WebSocket push payload on every observed reachability change
+      required: [type, device]
+      properties:
+        type:
+          type: string
+          enum: [status]
+        device:
+          $ref: '#/components/schemas/Device'
+      additionalProperties: false
+    Problem:
+      type: object
+      description: RFC 9457 problem details. All errors share this envelope.
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: about:blank
+        title:
+          type: string
+          example: not found
+        status:
+          type: integer
+          example: 404
+        detail:
+          type: string
+          example: 'storage: device not found'
+      additionalProperties: false
+    ValidationProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [errors]
+          properties:
+            errors:
+              type: object
+              description: Field to failing-rule map for 422 bodies
+              additionalProperties:
+                type: string
+              example: { "MAC": "mac" }
+          additionalProperties: false
+  responses:
+    NotFound:
+      description: Unknown id, RFC 9457 body
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Duplicate id, RFC 9457 body
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableEntity:
+      description: Semantic validation failure, RFC 9457 body
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ValidationProblem'
+    InternalError:
+      description: Server failure, generic detail, RFC 9457 body
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'

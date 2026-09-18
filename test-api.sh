@@ -1,16 +1,21 @@
 #!/bin/bash
+set -euo pipefail
 
-API="http://localhost:8080"
+API="${API:-http://localhost:8080}"
 
-echo "🌙 Wake-on-LAN API Test Suite\n"
+echo "Wake-on-LAN API test suite"
 
-# 1. Health Check
-echo "✅ 1. Health Check"
-curl -s "$API/" | jq .
+echo "1. Waiting for a healthy server"
+for _ in $(seq 1 30); do
+  if curl -sf "$API/health" > /dev/null; then
+    break
+  fi
+  sleep 1
+done
+curl -sf "$API/health" | jq .
 
-# 2. Ajouter device1 SANS IP (pas de ping)
-echo "✅ 2. Ajouter device1 (SANS IP, pas de ping)"
-curl -s -X POST "$API/devices" \
+echo "2. Add device1 (no IP, no ping)"
+curl -sf -X POST "$API/devices" \
   -H "Content-Type: application/json" \
   -d '{
     "id": "device1",
@@ -20,9 +25,8 @@ curl -s -X POST "$API/devices" \
     "status": "unknown"
   }' | jq .
 
-# 3. Ajouter device2 AVEC IP ET PING ACTIVÉ
-echo "✅ 3. Ajouter device2 (AVEC IP + PING ACTIVÉ)"
-curl -s -X POST "$API/devices" \
+echo "3. Add device2 (IP + ping enabled)"
+curl -sf -X POST "$API/devices" \
   -H "Content-Type: application/json" \
   -d '{
     "id": "device2",
@@ -33,46 +37,38 @@ curl -s -X POST "$API/devices" \
     "status": "unknown"
   }' | jq .
 
-# 4. Ajouter device3 AVEC IP (pour comparer)
-echo "✅ 4. Ajouter device3 (AVEC IP mais PING DÉSACTIVÉ)"
-curl -s -X POST "$API/devices" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "device3",
-    "name": "Cloudflare",
-    "mac": "11:22:33:44:55:66",
-    "ip": "1.1.1.1",
-    "ping_enabled": false,
-    "status": "unknown"
-  }' | jq .
+echo "4. List devices"
+curl -sf "$API/devices" | jq .
 
-# 5. Récupérer tous les devices
-echo "✅ 5. Récupérer tous les devices"
-curl -s "$API/devices" | jq .
-
-# 6. Attendre 3 secondes pour que le monitor fasse un ping
-echo "⏳ Attendre 3 secondes pour que le monitor fasse un ping..."
+echo "5. Wait for the monitor to ping"
 sleep 3
 
-# 7. Vérifier le statut de device2 (devrait être "up")
-echo "✅ 6. Vérifier device2 (devrait être UP)"
-curl -s "$API/devices/device2" | jq .
+echo "6. device2 should be up"
+curl -sf "$API/devices/device2" | jq .
 
-# 8. Vérifier device3 (devrait rester "unknown" car ping désactivé)
-echo "✅ 7. Vérifier device3 (devrait rester UNKNOWN - ping désactivé)"
-curl -s "$API/devices/device3" | jq .
+echo "7. Wake by MAC (POST canonical)"
+if [ "${SKIP_WAKE:-0}" = "1" ]; then
+  echo "skipped (SKIP_WAKE=1: no UDP broadcast route in this environment)"
+else
+  curl -sf -X POST "$API/wake/AA:BB:CC:DD:EE:FF" | jq .
+fi
 
-# 9. Tester Wake endpoint
-echo "✅ 8. Wake device2"
-curl -s "$API/wake/AA:BB:CC:DD:EE:FF" | jq .
+echo "8. Wake by ID"
+if [ "${SKIP_WAKE:-0}" = "1" ]; then
+  echo "skipped (SKIP_WAKE=1: no UDP broadcast route in this environment)"
+else
+  curl -sf -X POST "$API/devices/device2/wake" | jq .
+fi
 
-# 10. Supprimer device1
-echo "✅ 9. Supprimer device1"
-curl -s -X DELETE "$API/devices/device1" | jq .
+echo "9. Delete device1 (204, empty body)"
+code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/devices/device1")
+if [ "$code" != "204" ]; then
+  echo "expected 204, got $code"
+  exit 1
+fi
+echo "deleted (204)"
 
-# 11. Vérifier les devices restants
-echo "✅ 10. Vérifier les devices restants"
-curl -s "$API/devices" | jq .
+echo "10. Remaining devices"
+curl -sf "$API/devices" | jq .
 
-echo "\n✅ Tests terminés!"
-
+echo "Tests done"

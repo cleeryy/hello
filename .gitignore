@@ -8,6 +8,10 @@
 *.so
 *.dylib
 
+# Built binaries (go build output at repo root)
+/wol-api
+/hello
+
 # Test binary, built with `go test -c`
 *.test
 

@@ -1,9 +1,17 @@
 ---
 services:
   hello:
+    build: .
     image: ghcr.io/cleeryy/hello:latest
     ports:
-    - "8080:8080"
+      - "8080:8080"
+    env_file: .env
     environment:
-      DEFAULT_MAC: "AA:BB:CC:DD:EE:FF"
+      DEVICES_FILE: /app/devices.json
+    volumes:
+      - ./devices.json:/app/devices.json
     restart: unless-stopped
+    # NOTE: magic packets use subnet broadcast, which does not cross Docker's
+    # bridge network. If wake-ups never arrive, run with network_mode: host
+    # (Linux only) instead of the ports mapping above.
+    # network_mode: host

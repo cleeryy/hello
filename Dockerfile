@@ -1,22 +1,20 @@
-FROM golang:1.25.3-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
 
-COPY go.mod go.sum .
-
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /wol-api ./cmd/api
 
-RUN go mod tidy
+FROM alpine:3.18
+WORKDIR /app
 
-RUN go build -o hello .
-
-FROM alpine:latest
-
-WORKDIR /root/
-
-COPY --from=0 /app/hello /root/hello
+COPY --from=builder /wol-api /app/wol-api
 
 EXPOSE 8080
 
-CMD ["./hello"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+  CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+
+CMD ["./wol-api"]
