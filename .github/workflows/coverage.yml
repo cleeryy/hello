@@ -29,5 +29,4 @@ jobs:
         with:
           files: coverage.out
           flags: unittests
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }} # only needed for private repos
+          fail_ci_if_error: false # no Codecov token on forks/public clones

@@ -1,0 +1,11 @@
+[
+  {
+    "id": "pc-salon",
+    "name": "PC Salon",
+    "mac": "00:11:22:33:44:55",
+    "status": "unknown",
+    "ip": "192.168.1.50",
+    "ping_enabled": true,
+    "last_seen": 0
+  }
+]
