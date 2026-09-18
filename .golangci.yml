@@ -6,7 +6,6 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-    - gofumpt
 formatters:
   enable:
     - gofumpt
