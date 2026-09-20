@@ -11,6 +11,7 @@ import (
 	"github.com/cleeryy/hello/internal/config"
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
+	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
 	"github.com/cleeryy/hello/internal/wol"
@@ -18,11 +19,13 @@ import (
 
 // Server wires routes to the registry and the realtime hub.
 type Server struct {
-	cfg     *config.Config
-	store   *storage.Storage
-	hub     *wshub.Hub
-	hist    *history.History
-	sendWOL func(mac, broadcast string) error
+	cfg        *config.Config
+	store      *storage.Storage
+	hub        *wshub.Hub
+	hist       *history.History
+	schedStore *scheduler.Store
+	sched      *scheduler.Scheduler
+	sendWOL    func(mac, broadcast string) error
 }
 
 // New returns a Server sending magic packets via wol.SendWOLPacket.
@@ -33,6 +36,14 @@ func New(cfg *config.Config, store *storage.Storage, hub *wshub.Hub) *Server {
 // WithHistory wires the wake log; nil keeps the server running without one.
 func (s *Server) WithHistory(h *history.History) *Server {
 	s.hist = h
+	return s
+}
+
+// WithSchedules wires the schedule store and its runner; without it the
+// schedule routes stay unregistered and POST wakes remain manual only.
+func (s *Server) WithSchedules(store *scheduler.Store, sched *scheduler.Scheduler) *Server {
+	s.schedStore = store
+	s.sched = sched
 	return s
 }
 
@@ -63,6 +74,12 @@ func (s *Server) Mount(r *gin.Engine) {
 	guarded.DELETE("/devices/:id", s.deleteDevice)
 	guarded.POST("/devices/:id/wake", s.wakeDevice)
 	guarded.GET("/history", s.listHistory)
+	if s.schedStore != nil {
+		guarded.GET("/schedules", s.listSchedules)
+		guarded.POST("/schedules", s.createSchedule)
+		guarded.PUT("/schedules/:id", s.updateSchedule)
+		guarded.DELETE("/schedules/:id", s.deleteSchedule)
+	}
 }
 
 func (s *Server) welcome(c *gin.Context) {

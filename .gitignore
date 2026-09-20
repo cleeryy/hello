@@ -33,6 +33,7 @@ go.work.sum
 
 # Runtime data files (local state, never committed)
 wake-history.json
+schedules.json
 
 # Editor/IDE
 # .idea/

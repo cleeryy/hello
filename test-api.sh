@@ -71,4 +71,33 @@ echo "deleted (204)"
 echo "10. Remaining devices"
 curl -sf "$API/devices" | jq .
 
+echo "11. Create a schedule for device2"
+curl -sf -X POST "$API/schedules" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"e2e-morning","device_id":"device2","cron":"@daily"}' | jq .
+
+echo "12. Reject a schedule for an unknown device (422)"
+code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/schedules" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"e2e-ghost","device_id":"ghost","cron":"@daily"}')
+if [ "$code" != "422" ]; then
+  echo "expected 422, got $code"
+  exit 1
+fi
+echo "rejected (422)"
+
+echo "13. List schedules"
+curl -sf "$API/schedules" | jq .
+
+echo "14. Pause then delete the schedule"
+curl -sf -X PUT "$API/schedules/e2e-morning" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"e2e-morning","device_id":"device2","cron":"@daily","enabled":false}' | jq .
+code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/schedules/e2e-morning")
+if [ "$code" != "204" ]; then
+  echo "expected 204, got $code"
+  exit 1
+fi
+echo "deleted (204)"
+
 echo "Tests done"

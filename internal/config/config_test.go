@@ -17,6 +17,8 @@ func Test_LoadConfig_returns_defaults(t *testing.T) {
 	t.Setenv("BROADCAST_IP", "")
 	t.Setenv("DEVICES_FILE", "")
 	t.Setenv("MONITOR_INTERVAL_SEC", "")
+	t.Setenv("HISTORY_FILE", "")
+	t.Setenv("SCHEDULES_FILE", "")
 
 	// When
 	cfg, err := config.LoadConfig()
@@ -28,6 +30,8 @@ func Test_LoadConfig_returns_defaults(t *testing.T) {
 	assert.Equal(t, "255.255.255.255", cfg.BroadcastIP)
 	assert.Equal(t, "devices.json", cfg.DevicesFile)
 	assert.Equal(t, 30*time.Second, cfg.MonitorInterval)
+	assert.Equal(t, "wake-history.json", cfg.HistoryFile)
+	assert.Equal(t, "schedules.json", cfg.SchedulesFile)
 }
 
 func Test_LoadConfig_honors_env_overrides(t *testing.T) {
@@ -37,6 +41,8 @@ func Test_LoadConfig_honors_env_overrides(t *testing.T) {
 	t.Setenv("BROADCAST_IP", "192.168.1.255")
 	t.Setenv("DEVICES_FILE", "/tmp/d.json")
 	t.Setenv("MONITOR_INTERVAL_SEC", "5")
+	t.Setenv("HISTORY_FILE", "/tmp/h.json")
+	t.Setenv("SCHEDULES_FILE", "/tmp/s.json")
 
 	// When
 	cfg, err := config.LoadConfig()
@@ -47,6 +53,8 @@ func Test_LoadConfig_honors_env_overrides(t *testing.T) {
 	assert.Equal(t, "192.168.1.255", cfg.BroadcastIP)
 	assert.Equal(t, "/tmp/d.json", cfg.DevicesFile)
 	assert.Equal(t, 5*time.Second, cfg.MonitorInterval)
+	assert.Equal(t, "/tmp/h.json", cfg.HistoryFile)
+	assert.Equal(t, "/tmp/s.json", cfg.SchedulesFile)
 }
 
 func Test_LoadConfig_rejects_missing_default_mac(t *testing.T) {

@@ -324,6 +324,109 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /schedules:
+    get:
+      tags: [Schedules]
+      summary: List wake schedules
+      operationId: listSchedules
+      responses:
+        '200':
+          description: Every schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Schedules]
+      summary: Create a wake schedule
+      description: >-
+        Standard 5-field cron (minute hour day month weekday, e.g. "0 7 * * 1-5")
+        or a descriptor like @daily. The device must exist. Creation always
+        enables the schedule; pause it later with PUT setting enabled false.
+      operationId: createSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleInput'
+      responses:
+        '201':
+          description: Schedule created and running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Unknown device or bad cron, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /schedules/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      tags: [Schedules]
+      summary: Replace a schedule
+      description: Full replacement under the path id. Set enabled false to pause.
+      operationId: updateSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleInput'
+      responses:
+        '200':
+          description: Schedule replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unknown device or bad cron, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [Schedules]
+      summary: Delete a schedule
+      operationId: deleteSchedule
+      responses:
+        '204':
+          description: Deleted, empty body
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   parameters:
     MacAddress:
@@ -447,6 +550,50 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/WakeEvent'
+      additionalProperties: false
+    Schedule:
+      type: object
+      description: One cron wake for a registered device
+      required: [id, device_id, cron, enabled]
+      properties:
+        id:
+          type: string
+          example: morning
+        device_id:
+          type: string
+          example: pc-salon
+        cron:
+          type: string
+          description: Standard 5-field cron or descriptor (@daily, @every 1h)
+          example: 0 7 * * 1-5
+        enabled:
+          type: boolean
+      additionalProperties: false
+    ScheduleInput:
+      type: object
+      description: Same shape as Schedule. POST ignores enabled and activates.
+      required: [id, device_id, cron]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        device_id:
+          type: string
+          minLength: 1
+        cron:
+          type: string
+          minLength: 1
+        enabled:
+          type: boolean
+      additionalProperties: false
+    ScheduleList:
+      type: object
+      required: [schedules]
+      properties:
+        schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Schedule'
       additionalProperties: false
     Welcome:
       type: object

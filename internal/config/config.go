@@ -23,6 +23,8 @@ type Config struct {
 	APIToken string
 	// HistoryFile persists the wake log.
 	HistoryFile string
+	// SchedulesFile persists wake schedules.
+	SchedulesFile string
 }
 
 const (
@@ -30,6 +32,7 @@ const (
 	defaultBroadcastIP     = "255.255.255.255"
 	defaultDevicesFile     = "devices.json"
 	defaultHistoryFile     = "wake-history.json"
+	defaultSchedulesFile   = "schedules.json"
 	defaultMonitorInterval = 30 * time.Second
 )
 
@@ -47,6 +50,7 @@ func LoadConfig() (*Config, error) {
 		MonitorInterval: monitorInterval(),
 		APIToken:        os.Getenv("API_TOKEN"),
 		HistoryFile:     envOr("HISTORY_FILE", defaultHistoryFile),
+		SchedulesFile:   envOr("SCHEDULES_FILE", defaultSchedulesFile),
 	}
 
 	if cfg.DefaultMAC == "" {

@@ -14,9 +14,12 @@ import (
 	"github.com/cleeryy/hello/internal/config"
 	"github.com/cleeryy/hello/internal/handlers"
 	"github.com/cleeryy/hello/internal/history"
+	"github.com/cleeryy/hello/internal/models"
 	"github.com/cleeryy/hello/internal/monitor"
+	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
+	"github.com/cleeryy/hello/internal/wol"
 )
 
 func main() {
@@ -50,6 +53,36 @@ func run() error {
 	hub := wshub.NewHub()
 	go hub.Run(ctx)
 
+	schedStore := scheduler.NewStore(cfg.SchedulesFile)
+	sch := scheduler.New(schedStore,
+		func(id string) (models.Device, error) {
+			dev, err := store.Get(id)
+			if err != nil {
+				return models.Device{}, err
+			}
+			return *dev, nil
+		},
+		func(sched models.Schedule, dev models.Device) {
+			errMsg := ""
+			success := true
+			if err := wol.SendWOLPacket(dev.MAC, cfg.BroadcastIP); err != nil {
+				slog.Error("scheduled wol failed",
+					slog.String("schedule", sched.ID), slog.Any("err", err))
+				errMsg = err.Error()
+				success = false
+			}
+			if _, err := hist.Record(models.WakeEvent{
+				DeviceID: dev.ID,
+				MAC:      dev.MAC,
+				Trigger:  models.TriggerSchedule,
+				Success:  success,
+				Error:    errMsg,
+			}); err != nil {
+				slog.Warn("history record failed", slog.Any("err", err))
+			}
+		})
+	go sch.Start(ctx)
+
 	mon := monitor.New(store, cfg.MonitorInterval)
 	mon.OnStatusChange = hub.Broadcast
 	mon.Start(ctx)
@@ -58,7 +91,7 @@ func run() error {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	handlers.New(cfg, store, hub).WithHistory(hist).Mount(r)
+	handlers.New(cfg, store, hub).WithHistory(hist).WithSchedules(schedStore, sch).Mount(r)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,

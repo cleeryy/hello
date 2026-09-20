@@ -112,7 +112,20 @@ Device JSON shape (see `devices.example.json`):
 }
 ```
 
-### 5. Realtime status
+### 5. Wake history
+
+```
+GET /history
+```
+
+Every sent magic packet — manual or scheduled, success or failure — newest
+first. Filter by registry id, cap the page:
+
+```
+curl "http://localhost:8080/history?device_id=pc-salon&limit=20"
+```
+
+### 6. Realtime status
 
 ```
 GET /ws
@@ -130,7 +143,29 @@ curl -X POST http://localhost:8080/devices/pc-salon/wake
 
 A full walkthrough lives in `test-api.sh` (requires `jq` and a running server).
 
-### 7. Machine-readable docs
+### 7. Schedules
+
+```
+GET    /schedules
+POST   /schedules
+PUT    /schedules/:id
+DELETE /schedules/:id
+```
+
+Cron wakes for registered devices. Standard 5-field cron
+(`minute hour day month weekday`) or descriptors like `@daily`:
+
+```bash
+curl -X POST http://localhost:8080/schedules \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"morning","device_id":"pc-salon","cron":"0 7 * * 1-5"}'
+```
+
+Creation always enables the schedule; `PUT` the full object with
+`"enabled": false` to pause it, `DELETE` removes it. Fires are logged to
+`GET /history` with `"trigger": "schedule"`.
+
+### 8. Machine-readable docs
 
 ```
 GET /openapi.yaml
@@ -165,7 +200,7 @@ replacement, `DELETE` returns `204 No Content`.
 | `MONITOR_INTERVAL_SEC`| no       | `30`              | Status poll interval in seconds    |
 | `API_TOKEN`           | no       | *(open mode)*     | Bearer token locking the API       |
 | `HISTORY_FILE`        | no       | `wake-history.json` | Wake log file                    |
-| `HISTORY_FILE`        | no       | `wake-history.json` | Wake log file                    |
+| `SCHEDULES_FILE`      | no       | `schedules.json` | Wake schedules file               |
 
 Or create a `.env` file in the project root (see `.env.example`).
 
@@ -189,6 +224,7 @@ hello/
 │   ├── config/          # Env-based configuration
 │   ├── handlers/        # HTTP routes (wake + devices CRUD)
 │   ├── history/         # Wake log (ring buffer + persistence)
+│   ├── scheduler/       # Wake schedules (cron runner + file store)
 │   ├── models/          # Device type + validation
 │   ├── monitor/         # Background ping monitor
 │   ├── ping/            # ICMP/TCP ping helpers
