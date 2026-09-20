@@ -24,10 +24,8 @@ func (t Trigger) IsValid() bool {
 	return false
 }
 
-var (
-	// ErrInvalidTrigger is returned for trigger values outside the known set.
-	ErrInvalidTrigger = errors.New("models: invalid trigger")
-)
+// ErrInvalidTrigger is returned for trigger values outside the known set.
+var ErrInvalidTrigger = errors.New("models: invalid trigger")
 
 // WakeEvent is one sent magic packet, success or failure.
 // JSON field names are part of the on-disk/API contract.
