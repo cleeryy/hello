@@ -130,7 +130,7 @@ curl -X POST http://localhost:8080/devices/pc-salon/wake
 
 A full walkthrough lives in `test-api.sh` (requires `jq` and a running server).
 
-### 6. Machine-readable docs
+### 7. Machine-readable docs
 
 ```
 GET /openapi.yaml
@@ -164,6 +164,8 @@ replacement, `DELETE` returns `204 No Content`.
 | `DEVICES_FILE`        | no       | `devices.json`    | Device registry file               |
 | `MONITOR_INTERVAL_SEC`| no       | `30`              | Status poll interval in seconds    |
 | `API_TOKEN`           | no       | *(open mode)*     | Bearer token locking the API       |
+| `HISTORY_FILE`        | no       | `wake-history.json` | Wake log file                    |
+| `HISTORY_FILE`        | no       | `wake-history.json` | Wake log file                    |
 
 Or create a `.env` file in the project root (see `.env.example`).
 
@@ -186,6 +188,7 @@ hello/
 ├── internal/
 │   ├── config/          # Env-based configuration
 │   ├── handlers/        # HTTP routes (wake + devices CRUD)
+│   ├── history/         # Wake log (ring buffer + persistence)
 │   ├── models/          # Device type + validation
 │   ├── monitor/         # Background ping monitor
 │   ├── ping/            # ICMP/TCP ping helpers

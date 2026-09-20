@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -142,6 +143,31 @@ func (s *Storage) GetAll() []*models.Device {
 		devices = append(devices, clone(d))
 	}
 	return devices
+}
+
+// LookupMAC returns the id of the device holding mac, comparing canonical
+// forms so colon- and hyphen-separated spellings match. It reports false
+// when no registered device holds the address.
+func (s *Storage) LookupMAC(mac string) (string, bool) {
+	hw, err := net.ParseMAC(mac)
+	if err != nil {
+		return "", false
+	}
+	want := hw.String()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for id, d := range s.devices {
+		stored, err := net.ParseMAC(d.MAC)
+		if err != nil {
+			continue
+		}
+		if stored.String() == want {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 // Get returns a copy of the device with the given id.

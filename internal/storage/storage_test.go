@@ -160,3 +160,18 @@ func Test_Storage_concurrent_access(t *testing.T) {
 	// Then
 	assert.Len(t, s.GetAll(), 1)
 }
+
+func Test_Storage_LookupMAC_resolves_id(t *testing.T) {
+	// Given
+	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	require.NoError(t, s.Create(testDevice("pc1")))
+
+	// When
+	id, ok := s.LookupMAC("00-11-22-33-44-55")
+	_, missing := s.LookupMAC("AA:BB:CC:DD:EE:FF")
+
+	// Then
+	assert.True(t, ok)
+	assert.Equal(t, "pc1", id)
+	assert.False(t, missing)
+}

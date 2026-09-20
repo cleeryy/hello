@@ -9,6 +9,7 @@ import (
 	"github.com/go-playground/validator/v10"
 
 	"github.com/cleeryy/hello/internal/config"
+	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
 	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
@@ -20,12 +21,19 @@ type Server struct {
 	cfg     *config.Config
 	store   *storage.Storage
 	hub     *wshub.Hub
+	hist    *history.History
 	sendWOL func(mac, broadcast string) error
 }
 
 // New returns a Server sending magic packets via wol.SendWOLPacket.
 func New(cfg *config.Config, store *storage.Storage, hub *wshub.Hub) *Server {
 	return &Server{cfg: cfg, store: store, hub: hub, sendWOL: wol.SendWOLPacket}
+}
+
+// WithHistory wires the wake log; nil keeps the server running without one.
+func (s *Server) WithHistory(h *history.History) *Server {
+	s.hist = h
+	return s
 }
 
 // RegisterRoutes mounts the API, preserving the legacy flat paths.
@@ -54,6 +62,7 @@ func (s *Server) Mount(r *gin.Engine) {
 	guarded.PUT("/devices/:id", s.updateDevice)
 	guarded.DELETE("/devices/:id", s.deleteDevice)
 	guarded.POST("/devices/:id/wake", s.wakeDevice)
+	guarded.GET("/history", s.listHistory)
 }
 
 func (s *Server) welcome(c *gin.Context) {

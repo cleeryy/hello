@@ -13,6 +13,7 @@ import (
 
 	"github.com/cleeryy/hello/internal/config"
 	"github.com/cleeryy/hello/internal/handlers"
+	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/monitor"
 	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
@@ -41,6 +42,11 @@ func run() error {
 
 	store := storage.New(cfg.DevicesFile)
 
+	hist, err := history.New(cfg.HistoryFile)
+	if err != nil {
+		return err
+	}
+
 	hub := wshub.NewHub()
 	go hub.Run(ctx)
 
@@ -52,7 +58,7 @@ func run() error {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	handlers.RegisterRoutes(r, cfg, store, hub)
+	handlers.New(cfg, store, hub).WithHistory(hist).Mount(r)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,

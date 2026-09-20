@@ -290,6 +290,40 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /history:
+    get:
+      tags: [Devices]
+      summary: List recorded wakes
+      description: Newest first. Filter by registry id, cap the page with limit.
+      operationId: listHistory
+      parameters:
+        - name: device_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        '200':
+          description: Wake log snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeHistory'
+        '400':
+          description: Bad limit, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 components:
   parameters:
     MacAddress:
@@ -376,6 +410,43 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Device'
+      additionalProperties: false
+    WakeEvent:
+      type: object
+      description: One sent magic packet, success or failure, newest first
+      required: [id, device_id, mac, at, trigger, success]
+      properties:
+        id:
+          type: string
+          example: h-1758210000000000000-1
+        device_id:
+          type: string
+          description: Registry id, or the MAC itself for unregistered targets
+          example: pc-salon
+        mac:
+          type: string
+          pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+          example: 00:11:22:33:44:55
+        at:
+          type: integer
+          format: int64
+          description: Unix seconds when the packet was sent
+        trigger:
+          type: string
+          enum: [manual, schedule]
+        success:
+          type: boolean
+        error:
+          type: string
+      additionalProperties: false
+    WakeHistory:
+      type: object
+      required: [history]
+      properties:
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/WakeEvent'
       additionalProperties: false
     Welcome:
       type: object

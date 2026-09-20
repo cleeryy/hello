@@ -21,12 +21,15 @@ type Config struct {
 	// APIToken locks the API behind Bearer auth. Empty means open
 	// mode: convenient locally, never for an exposed server.
 	APIToken string
+	// HistoryFile persists the wake log.
+	HistoryFile string
 }
 
 const (
 	defaultPort            = "8080"
 	defaultBroadcastIP     = "255.255.255.255"
 	defaultDevicesFile     = "devices.json"
+	defaultHistoryFile     = "wake-history.json"
 	defaultMonitorInterval = 30 * time.Second
 )
 
@@ -43,6 +46,7 @@ func LoadConfig() (*Config, error) {
 		DevicesFile:     envOr("DEVICES_FILE", defaultDevicesFile),
 		MonitorInterval: monitorInterval(),
 		APIToken:        os.Getenv("API_TOKEN"),
+		HistoryFile:     envOr("HISTORY_FILE", defaultHistoryFile),
 	}
 
 	if cfg.DefaultMAC == "" {
