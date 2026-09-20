@@ -165,7 +165,36 @@ Creation always enables the schedule; `PUT` the full object with
 `"enabled": false` to pause it, `DELETE` removes it. Fires are logged to
 `GET /history` with `"trigger": "schedule"`.
 
-### 8. Machine-readable docs
+### 8. LAN discovery
+
+```
+POST /discover
+POST /discover/adopt
+```
+
+Shows which boxes are actually out there — TCP-probes the local /24,
+then maps live IPs to MACs via the OS ARP table:
+
+```bash
+curl -X POST http://localhost:8080/discover
+# {"hosts":[{"ip":"192.168.1.10","mac":"11:22:33:44:55:66",
+#             "hostname":"nas.local","known":false}, ...]}
+```
+
+Adopt the keepers as devices (all-or-nothing: one duplicate MAC 409s the
+whole batch, so a retry never creates half a fleet):
+
+```bash
+curl -X POST http://localhost:8080/discover/adopt \
+  -H 'Content-Type: application/json' \
+  -d '{"hosts":[{"mac":"11:22:33:44:55:66","ip":"192.168.1.10"}]}'
+# → 201 {"devices":[...]} — name defaults to hostname, else host-<ip>
+```
+
+One scan at a time with a 30s cooldown; concurrent or early rescans get
+`429` with a `Retry-After` hint. No root required, stdlib only.
+
+### 9. Machine-readable docs
 
 ```
 GET /openapi.yaml

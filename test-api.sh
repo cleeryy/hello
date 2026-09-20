@@ -100,4 +100,17 @@ if [ "$code" != "204" ]; then
 fi
 echo "deleted (204)"
 
+echo "15. Discover the LAN"
+curl -sf -X POST "$API/discover" | jq .
+
+echo "16. Reject an empty adopt batch (422)"
+code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/discover/adopt" \
+  -H "Content-Type: application/json" \
+  -d '{"hosts":[]}')
+if [ "$code" != "422" ]; then
+  echo "expected 422, got $code"
+  exit 1
+fi
+echo "rejected (422)"
+
 echo "Tests done"

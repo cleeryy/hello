@@ -35,7 +35,8 @@ func TestEmbeddedSpec(t *testing.T) {
 	paths := []string{
 		"/", "/health", "/ws", "/wake", "/wake/{macAddress}",
 		"/devices", "/devices/{id}", "/devices/{id}/wake", "/history",
-		"/schedules", "/schedules/{id}", "/openapi.yaml", "/docs",
+		"/schedules", "/schedules/{id}", "/discover", "/discover/adopt",
+		"/openapi.yaml", "/docs",
 	}
 	for _, p := range paths {
 		ops, ok := doc.Paths[p]
@@ -52,7 +53,7 @@ func TestEmbeddedSpec(t *testing.T) {
 			require.NotEmpty(t, resp, "%s %s a des responses non vides", method, p)
 		}
 	}
-	for _, s := range []string{"Device", "Problem", "ValidationProblem", "StatusChange", "WakeEvent", "WakeHistory", "Schedule", "ScheduleInput", "ScheduleList"} {
+	for _, s := range []string{"Device", "Problem", "ValidationProblem", "StatusChange", "WakeEvent", "WakeHistory", "Schedule", "ScheduleInput", "ScheduleList", "Host", "DiscoverResult", "AdoptInput"} {
 		require.Contains(t, doc.Components.Schemas, s, "schema %s défini", s)
 	}
 	require.Contains(t, string(YAML), "application/problem+json")

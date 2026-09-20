@@ -9,6 +9,7 @@ import (
 	"github.com/go-playground/validator/v10"
 
 	"github.com/cleeryy/hello/internal/config"
+	"github.com/cleeryy/hello/internal/discover"
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
 	"github.com/cleeryy/hello/internal/scheduler"
@@ -25,6 +26,7 @@ type Server struct {
 	hist       *history.History
 	schedStore *scheduler.Store
 	sched      *scheduler.Scheduler
+	disc       *discover.Scanner
 	sendWOL    func(mac, broadcast string) error
 }
 
@@ -44,6 +46,13 @@ func (s *Server) WithHistory(h *history.History) *Server {
 func (s *Server) WithSchedules(store *scheduler.Store, sched *scheduler.Scheduler) *Server {
 	s.schedStore = store
 	s.sched = sched
+	return s
+}
+
+// WithDiscover wires the LAN scanner; without it the discover routes stay
+// unregistered and onboarding stays manual.
+func (s *Server) WithDiscover(d *discover.Scanner) *Server {
+	s.disc = d
 	return s
 }
 
@@ -79,6 +88,10 @@ func (s *Server) Mount(r *gin.Engine) {
 		guarded.POST("/schedules", s.createSchedule)
 		guarded.PUT("/schedules/:id", s.updateSchedule)
 		guarded.DELETE("/schedules/:id", s.deleteSchedule)
+	}
+	if s.disc != nil {
+		guarded.POST("/discover", s.scanNetwork)
+		guarded.POST("/discover/adopt", s.adoptHosts)
 	}
 }
 

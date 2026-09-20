@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/cleeryy/hello/internal/config"
+	"github.com/cleeryy/hello/internal/discover"
 	"github.com/cleeryy/hello/internal/handlers"
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
@@ -91,7 +92,7 @@ func run() error {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	handlers.New(cfg, store, hub).WithHistory(hist).WithSchedules(schedStore, sch).Mount(r)
+	handlers.New(cfg, store, hub).WithHistory(hist).WithSchedules(schedStore, sch).WithDiscover(discover.New()).Mount(r)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
