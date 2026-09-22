@@ -1,0 +1,11 @@
+blank_issues: false
+contact_links:
+  - name: Documentation
+    url: https://cleeryy.github.io/hello/
+    about: Landing page, quickstart and links.
+  - name: Wiki
+    url: https://github.com/cleeryy/hello/wiki
+    about: Installation, configuration, API, reverse proxy, dashboard.
+  - name: Security policy
+    url: https://github.com/cleeryy/hello/blob/master/SECURITY.md
+    about: Supported versions and how to report sensitive issues.

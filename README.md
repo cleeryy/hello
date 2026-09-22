@@ -1,6 +1,8 @@
 # hello
 
 [![Docker Build](https://github.com/cleeryy/hello/actions/workflows/docker-build.yml/badge.svg)](https://github.com/cleeryy/hello/actions/workflows/docker-build.yml)
+[![CI](https://github.com/cleeryy/hello/actions/workflows/ci.yml/badge.svg)](https://github.com/cleeryy/hello/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cleeryy/hello)](https://github.com/cleeryy/hello/releases)
 [![Go Version](https://img.shields.io/badge/Go-1.26-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hello — Wake-on-LAN service</title>
-<meta name="description" content="hello: register machines, send magic packets, track reachability. Single Go binary.">
+<meta name="description" content="hello: register machines, send magic packets, track reachability. Docker-first, single Go binary.">
 <style>
 :root{color-scheme:light dark}
 *{box-sizing:border-box}
@@ -25,6 +25,10 @@ h1{font-size:40px;margin:8px 0;letter-spacing:-.02em}
 .card p{font-size:14px;margin:0;opacity:.75}
 pre{background:#1c1917;color:#e7e5e4;border-radius:12px;padding:16px;overflow:auto;font-size:13px}
 @media(prefers-color-scheme:dark){pre{background:#000}}
+table{border-collapse:collapse;font-size:14px;margin:12px 0}
+td,th{border:1px solid #d6d3d1;padding:6px 10px;text-align:left}
+@media(prefers-color-scheme:dark){td,th{border-color:#292524}}
+.small{font-size:13px;opacity:.75}
 footer{margin-top:40px;font-size:13px;opacity:.6}
 </style>
 </head>
@@ -32,7 +36,7 @@ footer{margin-top:40px;font-size:13px;opacity:.6}
 <div class="wrap">
 <p class="eyebrow">Wake-on-LAN</p>
 <h1>hello</h1>
-<p class="lede">Register machines, send magic packets by hand or cron, watch reachability go live. One Go binary, file persistence, one Bearer token.</p>
+<p class="lede">Register machines, send magic packets by hand or cron, watch reachability go live. Docker-first, one Bearer token.</p>
 <div class="badges">
 <a href="https://github.com/cleeryy/hello/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/cleeryy/hello/actions/workflows/ci.yml/badge.svg"></a>
 <a href="https://github.com/cleeryy/hello/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cleeryy/hello"></a>
@@ -47,12 +51,19 @@ footer{margin-top:40px;font-size:13px;opacity:.6}
 <div class="card"><h2>Discovery</h2><p>Scan the LAN, adopt what you recognise. Atomic, throttled.</p></div>
 <div class="card"><h2>Realtime</h2><p>Status changes pushed over WebSocket with strict origin checks.</p></div>
 </div>
-<h2>Run it</h2>
+<h2>Run it with Docker</h2>
+<p>Quick try (token printed at the end, keep it):</p>
+<pre>export API_TOKEN=$(openssl rand -hex 16) &amp;&amp; docker run -d --name hello -p 8080:8080 -v hello-data:/app -e DEFAULT_MAC=00:11:22:33:44:55 -e API_TOKEN=$API_TOKEN ghcr.io/cleeryy/hello:stable &amp;&amp; echo "token: $API_TOKEN"</pre>
+<p>Persistent setup with compose:</p>
+<pre>export API_TOKEN=$(openssl rand -hex 16)
+export DEFAULT_MAC=00:11:22:33:44:55
+docker compose up --build</pre>
+<p class="small">Images: <code>stable</code> and <code>latest</code> move with releases; pin <code>1.1.0</code>, <code>1.1</code>, <code>1</code> for reproducible deploys. Dashboard at <code>/dashboard</code>, API docs at <code>/docs</code> on your instance.</p>
+<p class="small">Heads-up: container bridge networks don’t forward LAN broadcast — Wake works best with <code>network_mode: host</code> on Linux or a plain <code>go run</code> on Mac/Windows.</p>
+<h2>Run it with Go</h2>
 <pre>export DEFAULT_MAC=00:11:22:33:44:55
 export API_TOKEN=$(openssl rand -hex 16)
-go run ./cmd/api
-# or: docker compose up --build</pre>
-<p>Dashboard at <code>/dashboard</code>, API docs at <code>/docs</code>, contract at <code>/openapi.yaml</code> on your instance.</p>
+go run ./cmd/api</pre>
 <footer>hello — MIT. Docs live in the <a href="https://github.com/cleeryy/hello/wiki">wiki</a>.</footer>
 </div>
 </body>

@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose something hello should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today, in one or two sentences?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The behavior you want (routes, dashboard, config). Keep it minimal.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Out of scope
+      description: What this request explicitly does NOT cover.
+    validations:
+      required: false

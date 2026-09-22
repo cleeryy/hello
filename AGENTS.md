@@ -21,7 +21,14 @@ shared Bearer, TLS at the reverse proxy).
 
 ## Conventions
 
-- Conventional Commits enforced on PR titles (`semantic-pr` workflow):
+- Flow: feature branches → PR against `dev` (never `master` directly);
+  releases go `dev` → `master` via PR titled `chore(release): vX.Y.Z`,
+  then tag `vX.Y.Z` (rebuilds + scans the release image with
+  `stable`/`latest` tags). Branches `dev` and `master` are protected
+  (required checks, no force-push/delete, admins included).
+- Every PR links an issue (`Closes #NNN`, created first if missing) —
+  enforced by the `issue-link` CI check. Conventional Commits enforced
+  on PR titles (`semantic-pr` workflow):
   `feat:`, `fix:`, `chore:`, `docs:` … Release notes come from PR labels
   (`release-drafter`): `feature`/`enhancement`, `bug`/`fix`/`bugfix`, `chore`,
   version with `major`/`minor`/`patch` (default `patch`).
