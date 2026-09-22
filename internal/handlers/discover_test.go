@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/cleeryy/hello/internal/config"
 	"github.com/cleeryy/hello/internal/discover"
-	"github.com/cleeryy/hello/internal/storage"
 )
 
 func discoverRouter(t *testing.T, lnPort int) (*gin.Engine, *discover.Scanner) {
@@ -26,7 +26,7 @@ func discoverRouter(t *testing.T, lnPort int) (*gin.Engine, *discover.Scanner) {
 	d.Subnet = subnet
 	d.ProbePorts = []int{lnPort}
 	d.ResolveHostname = func(string) string { return "" }
-	srv := New(&config.Config{}, storage.New(t.TempDir()+"/d.json"), nil).WithDiscover(d)
+	srv := New(&config.Config{}, newStorage(t, t.TempDir()+"/d.json"), nil).WithDiscover(d)
 	r := gin.New()
 	srv.Mount(r)
 	return r, d
@@ -130,6 +130,46 @@ func TestAdopt_whenInvalid(t *testing.T) {
 		require.Equal(t, http.StatusUnprocessableEntity, w.Code, payload)
 		require.Contains(t, w.Header().Get("Content-Type"), "application/problem+json")
 	}
+}
+
+func TestAdopt_whenBatchExceedsLimit(t *testing.T) {
+	r, _ := discoverRouter(t, 0)
+	hosts := make([]map[string]string, 101)
+	for i := range hosts {
+		hosts[i] = map[string]string{"mac": fmt.Sprintf("AA:BB:CC:DD:EE:%02X", i+1)}
+	}
+	raw, err := json.Marshal(map[string]any{"hosts": hosts})
+	require.NoError(t, err)
+
+	w := doPOST(t, r, "/discover/adopt", string(raw))
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code)
+}
+
+// Given: an adoption batch with the same new MAC twice
+// When: POSTing /discover/adopt
+// Then: 422 and nothing stored, so adopting it alone right after 201s.
+func TestAdopt_whenSameBatchDuplicate(t *testing.T) {
+	r, _ := discoverRouter(t, 0)
+
+	w := doPOST(t, r, "/discover/adopt", `{"hosts":[
+		{"mac":"AA:BB:CC:DD:EE:31","ip":"192.168.7.31"},
+		{"mac":"AA:BB:CC:DD:EE:31","ip":"192.168.7.32"}
+	]}`)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code)
+
+	w = doPOST(t, r, "/discover/adopt", `{"hosts":[{"mac":"AA:BB:CC:DD:EE:31"}]}`)
+	require.Equal(t, http.StatusCreated, w.Code)
+}
+
+func TestAdopt_whenRateLimited(t *testing.T) {
+	r, _ := discoverRouter(t, 0)
+	for i := 0; i < 5; i++ {
+		w := doPOST(t, r, "/discover/adopt", `{"hosts":[{"mac":"AA:BB:CC:DD:EE:4`+string(rune('0'+i))+`"}]}`)
+		require.Equal(t, http.StatusCreated, w.Code)
+	}
+	w := doPOST(t, r, "/discover/adopt", `{"hosts":[{"mac":"AA:BB:CC:DD:EE:45"}]}`)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
 }
 
 var _ = context.Background

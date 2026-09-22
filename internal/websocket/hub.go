@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,8 @@ type Hub struct {
 	unregister chan *client
 	broadcast  chan models.Device
 	clients    map[*client]struct{}
+	allowed    map[string]struct{}
+	upgrader   websocket.Upgrader
 }
 
 type client struct {
@@ -39,14 +42,43 @@ type client struct {
 	send chan []byte
 }
 
-// NewHub returns a Hub. Call Run before Broadcast.
-func NewHub() *Hub {
-	return &Hub{
-		register:   make(chan *client),
-		unregister: make(chan *client),
+// NewHub returns a Hub with a closed-by-default browser origin policy.
+// Non-browser clients without an Origin header remain supported.
+func NewHub(allowedOrigins ...string) *Hub {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		allowed[origin] = struct{}{}
+	}
+	h := &Hub{
+		register:   make(chan *client, 16),
+		unregister: make(chan *client, 16),
 		broadcast:  make(chan models.Device, 64),
 		clients:    make(map[*client]struct{}),
+		allowed:    allowed,
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  4096,
+			WriteBufferSize: 4096,
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true
+				}
+				if _, ok := allowed[origin]; ok {
+					return true
+				}
+				// Same-origin (dashboard served by the API itself).
+				host := origin
+				if i := strings.Index(host, "://"); i >= 0 {
+					host = host[i+3:]
+				}
+				if i := strings.Index(host, "/"); i >= 0 {
+					host = host[:i]
+				}
+				return host != "" && host == r.Host
+			},
+		},
 	}
+	return h
 }
 
 // Run dispatches registrations and broadcasts until ctx is done.
@@ -95,17 +127,13 @@ func encode(msg Message) []byte {
 	return data
 }
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
-	CheckOrigin: func(*http.Request) bool {
-		return true
-	},
-}
-
 // ServeWS upgrades the connection and pumps messages until it closes.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	var responseHeader http.Header
+	if protocol, ok := firstProtocol(r.Header.Get("Sec-WebSocket-Protocol")); ok {
+		responseHeader = http.Header{"Sec-WebSocket-Protocol": []string{protocol}}
+	}
+	conn, err := h.upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
 		slog.Error("ws upgrade failed", slog.Any("err", err))
 		return
@@ -155,6 +183,15 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func firstProtocol(header string) (string, bool) {
+	for _, protocol := range strings.Split(header, ",") {
+		if protocol = strings.TrimSpace(protocol); protocol != "" {
+			return protocol, true
+		}
+	}
+	return "", false
 }
 
 // Handler adapts the hub to gin.

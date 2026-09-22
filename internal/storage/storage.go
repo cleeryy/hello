@@ -26,17 +26,20 @@ type Storage struct {
 	file    string
 }
 
-// New opens the registry at filepath, loading existing entries when present.
-func New(filepath string) *Storage {
-	s := &Storage{
-		devices: make(map[string]*models.Device),
-		file:    filepath,
+// New opens the registry and fails fast when an existing file is unreadable or
+// corrupt. A missing file starts an empty registry.
+func New(path string) (*Storage, error) {
+	s := &Storage{devices: make(map[string]*models.Device), file: path}
+	if err := s.Load(); err != nil {
+		return nil, err
 	}
-	_ = s.Load()
-	return s
+	if err := os.Chmod(path, 0o600); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("storage: chmod %s: %w", path, err)
+	}
+	return s, nil
 }
 
-// Load replaces the in-memory registry with the file content.
+// Load replaces the in-memory registry with validated file content.
 // A missing file means an empty registry, not an error.
 func (s *Storage) Load() error {
 	s.mu.Lock()
@@ -45,22 +48,29 @@ func (s *Storage) Load() error {
 	data, err := os.ReadFile(s.file)
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.devices = make(map[string]*models.Device)
 			return nil
 		}
 		return fmt.Errorf("storage: read %s: %w", s.file, err)
 	}
 
-	var devices []*models.Device
-	if err := json.Unmarshal(data, &devices); err != nil {
+	var loaded []*models.Device
+	if err := json.Unmarshal(data, &loaded); err != nil {
 		return fmt.Errorf("storage: decode %s: %w", s.file, err)
 	}
 
-	fresh := make(map[string]*models.Device, len(devices))
-	for _, d := range devices {
+	fresh := make(map[string]*models.Device, len(loaded))
+	for _, d := range loaded {
 		if d == nil {
-			continue
+			return fmt.Errorf("storage: decode %s: null device entry", s.file)
 		}
-		fresh[d.ID] = d
+		if err := d.Validate(); err != nil {
+			return fmt.Errorf("storage: validate %s: %w", s.file, err)
+		}
+		if _, exists := fresh[d.ID]; exists {
+			return fmt.Errorf("storage: decode %s: duplicate device id %q", s.file, d.ID)
+		}
+		fresh[d.ID] = clone(d)
 	}
 	s.devices = fresh
 	return nil
@@ -71,7 +81,7 @@ func (s *Storage) Load() error {
 func (s *Storage) save() error {
 	devices := make([]*models.Device, 0, len(s.devices))
 	for _, d := range s.devices {
-		devices = append(devices, d)
+		devices = append(devices, clone(d))
 	}
 
 	data, err := json.MarshalIndent(devices, "", "  ")
@@ -85,17 +95,21 @@ func (s *Storage) save() error {
 		return fmt.Errorf("storage: create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-
-	if _, err := tmp.Write(data); err != nil {
+	defer func() {
 		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("storage: chmod temp file: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
 		return fmt.Errorf("storage: write temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("storage: sync temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("storage: close temp file: %w", err)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		return fmt.Errorf("storage: chmod temp file: %w", err)
 	}
 	if err := os.Rename(tmpName, s.file); err != nil {
 		return fmt.Errorf("storage: replace %s: %w", s.file, err)
@@ -104,8 +118,19 @@ func (s *Storage) save() error {
 }
 
 func clone(d *models.Device) *models.Device {
+	if d == nil {
+		return nil
+	}
 	cpy := *d
 	return &cpy
+}
+
+func cloneDevices(in map[string]*models.Device) map[string]*models.Device {
+	out := make(map[string]*models.Device, len(in))
+	for id, d := range in {
+		out[id] = clone(d)
+	}
+	return out
 }
 
 // Save persists the current registry.
@@ -115,22 +140,53 @@ func (s *Storage) Save() error {
 	return s.save()
 }
 
-// Create validates and inserts a device.
+// Create validates and atomically inserts one device.
 func (s *Storage) Create(device *models.Device) error {
-	device.Normalize()
-	if err := device.Validate(); err != nil {
-		return fmt.Errorf("storage: create: %w", err)
+	_, err := s.CreateMany([]*models.Device{device})
+	return err
+}
+
+// CreateMany pre-validates a batch, then performs one locked write. On any
+// persistence failure the in-memory registry is restored to its prior state.
+func (s *Storage) CreateMany(devices []*models.Device) ([]*models.Device, error) {
+	prepared := make([]*models.Device, 0, len(devices))
+	seen := make(map[string]struct{}, len(devices))
+	for _, device := range devices {
+		if device == nil {
+			return nil, fmt.Errorf("storage: create: nil device")
+		}
+		device.Normalize()
+		if err := device.Validate(); err != nil {
+			return nil, fmt.Errorf("storage: create: %w", err)
+		}
+		if _, duplicate := seen[device.ID]; duplicate {
+			return nil, fmt.Errorf("storage: create: duplicate device id %q", device.ID)
+		}
+		seen[device.ID] = struct{}{}
+		prepared = append(prepared, clone(device))
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if _, exists := s.devices[device.ID]; exists {
-		return fmt.Errorf("storage: create %s: %w", device.ID, ErrAlreadyExists)
+	for _, device := range prepared {
+		if _, exists := s.devices[device.ID]; exists {
+			return nil, fmt.Errorf("storage: create %s: %w", device.ID, ErrAlreadyExists)
+		}
+	}
+	previous := cloneDevices(s.devices)
+	for _, device := range prepared {
+		s.devices[device.ID] = clone(device)
+	}
+	if err := s.save(); err != nil {
+		s.devices = previous
+		return nil, err
 	}
 
-	s.devices[device.ID] = clone(device)
-	return s.save()
+	created := make([]*models.Device, 0, len(prepared))
+	for _, device := range prepared {
+		created = append(created, clone(device))
+	}
+	return created, nil
 }
 
 // GetAll returns a snapshot copy of every device.
@@ -182,7 +238,7 @@ func (s *Storage) Get(id string) (*models.Device, error) {
 	return clone(d), nil
 }
 
-// Update validates and replaces the device with the given id.
+// Update validates and atomically replaces the device with the given id.
 func (s *Storage) Update(id string, device *models.Device) error {
 	device.ID = id
 	device.Normalize()
@@ -192,16 +248,19 @@ func (s *Storage) Update(id string, device *models.Device) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	if _, ok := s.devices[id]; !ok {
 		return fmt.Errorf("storage: update %s: %w", id, ErrNotFound)
 	}
-
+	previous := cloneDevices(s.devices)
 	s.devices[id] = clone(device)
-	return s.save()
+	if err := s.save(); err != nil {
+		s.devices = previous
+		return err
+	}
+	return nil
 }
 
-// Delete removes the device with the given id.
+// Delete atomically removes the device with the given id.
 func (s *Storage) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -209,7 +268,11 @@ func (s *Storage) Delete(id string) error {
 	if _, ok := s.devices[id]; !ok {
 		return fmt.Errorf("storage: delete %s: %w", id, ErrNotFound)
 	}
-
+	previous := cloneDevices(s.devices)
 	delete(s.devices, id)
-	return s.save()
+	if err := s.save(); err != nil {
+		s.devices = previous
+		return err
+	}
+	return nil
 }

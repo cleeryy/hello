@@ -93,6 +93,18 @@ func TestWakeSuccessShape(t *testing.T) {
 	require.NotContains(t, body, "status")
 }
 
+func TestWake_whenCooldownActive(t *testing.T) {
+	s := newTestServer(t)
+	s.sendWOL = func(mac, broadcast string) error { return nil }
+
+	first := doRequest(s, http.MethodPost, "/wake/AA:BB:CC:DD:EE:FF", nil)
+	second := doRequest(s, http.MethodPost, "/wake/AA:BB:CC:DD:EE:FF", nil)
+
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Equal(t, http.StatusTooManyRequests, second.Code)
+	require.Equal(t, "30", second.Header().Get("Retry-After"))
+}
+
 // Given: le serveur monté
 // When: GET /openapi.yaml puis GET /docs
 // Then: 200, YAML contenant openapi: 3.1 et HTML contenant swagger.

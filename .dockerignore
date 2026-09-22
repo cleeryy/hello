@@ -4,4 +4,10 @@ hello
 *.out
 coverage.*
 .env
+.env.example
 devices.json
+wake-history.json
+schedules.json
+.git
+.omo/
+test-api.sh

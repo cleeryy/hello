@@ -12,7 +12,6 @@ import (
 	"github.com/cleeryy/hello/internal/config"
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
-	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
 )
 
@@ -20,7 +19,7 @@ func mountWithHistory(t *testing.T) (*gin.Engine, *history.History) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	dir := t.TempDir()
-	store := storage.New(dir + "/devices.json")
+	store := newStorage(t, dir+"/devices.json")
 	require.NoError(t, store.Create(&models.Device{
 		ID: "pc1", Name: "PC 1", MAC: "00:11:22:33:44:55", Status: models.StatusUnknown,
 	}))

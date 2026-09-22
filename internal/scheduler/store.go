@@ -23,23 +23,36 @@ type Store struct {
 	items map[string]models.Schedule
 }
 
-// NewStore loads path, starting empty when the file is absent.
-func NewStore(path string) *Store {
+// NewStore loads path and fails fast when an existing file is corrupt.
+func NewStore(path string) (*Store, error) {
 	s := &Store{path: path, items: map[string]models.Schedule{}}
 	raw, err := os.ReadFile(path)
-	if err != nil || len(raw) == 0 {
-		return s
+	if err != nil {
+		if os.IsNotExist(err) {
+			return s, nil
+		}
+		return nil, fmt.Errorf("scheduler: read %s: %w", path, err)
+	}
+	if len(raw) == 0 {
+		return s, nil
 	}
 	var list []models.Schedule
 	if err := json.Unmarshal(raw, &list); err != nil {
-		return s
+		return nil, fmt.Errorf("scheduler: decode %s: %w", path, err)
 	}
-	for _, item := range list {
-		if item.ID != "" {
-			s.items[item.ID] = item
+	for i := range list {
+		if err := list[i].Validate(); err != nil {
+			return nil, fmt.Errorf("scheduler: validate %s at index %d: %w", path, i, err)
 		}
+		if _, exists := s.items[list[i].ID]; exists {
+			return nil, fmt.Errorf("scheduler: decode %s: duplicate schedule id %q", path, list[i].ID)
+		}
+		s.items[list[i].ID] = list[i]
 	}
-	return s
+	if err := os.Chmod(path, 0o600); err != nil {
+		return nil, fmt.Errorf("scheduler: chmod %s: %w", path, err)
+	}
+	return s, nil
 }
 
 // All returns every schedule in no guaranteed order.
@@ -75,9 +88,17 @@ func (s *Store) Create(in models.Schedule) (models.Schedule, error) {
 	if _, ok := s.items[in.ID]; ok {
 		return models.Schedule{}, fmt.Errorf("%w: %s", ErrAlreadyExists, in.ID)
 	}
+	previous := make(map[string]models.Schedule, len(s.items)+1)
+	for id, item := range s.items {
+		previous[id] = item
+	}
 	in.Enabled = true
 	s.items[in.ID] = in
-	return in, s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		s.items = previous
+		return models.Schedule{}, err
+	}
+	return in, nil
 }
 
 // Update replaces the schedule kept under id, keeping the path id.
@@ -92,8 +113,16 @@ func (s *Store) Update(id string, in models.Schedule) (models.Schedule, error) {
 	if _, ok := s.items[id]; !ok {
 		return models.Schedule{}, fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
+	previous := make(map[string]models.Schedule, len(s.items))
+	for itemID, item := range s.items {
+		previous[itemID] = item
+	}
 	s.items[id] = in
-	return in, s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		s.items = previous
+		return models.Schedule{}, err
+	}
+	return in, nil
 }
 
 // Delete removes a schedule by id.
@@ -103,8 +132,16 @@ func (s *Store) Delete(id string) error {
 	if _, ok := s.items[id]; !ok {
 		return fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
+	previous := make(map[string]models.Schedule, len(s.items))
+	for itemID, item := range s.items {
+		previous[itemID] = item
+	}
 	delete(s.items, id)
-	return s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		s.items = previous
+		return err
+	}
+	return nil
 }
 
 func (s *Store) saveLocked() error {
@@ -114,19 +151,31 @@ func (s *Store) saveLocked() error {
 	}
 	raw, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("scheduler: encode: %w", err)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".schedules-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("scheduler: create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
-	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+	defer func() {
 		_ = tmp.Close()
-		return err
+		_ = os.Remove(tmpName)
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("scheduler: chmod temp file: %w", err)
+	}
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		return fmt.Errorf("scheduler: write temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("scheduler: sync temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return fmt.Errorf("scheduler: close temp file: %w", err)
 	}
-	return os.Rename(tmpName, s.path)
+	if err := os.Rename(tmpName, s.path); err != nil {
+		return fmt.Errorf("scheduler: replace %s: %w", s.path, err)
+	}
+	return nil
 }

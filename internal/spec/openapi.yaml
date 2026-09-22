@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: hello
-  version: 1.0.0
+  version: 1.1.0
   description: Wake-on-LAN registry with live presence. Send magic packets, track
     devices, and subscribe to status changes over WebSocket.
   license:
@@ -660,7 +660,7 @@ components:
     Host:
       type: object
       description: One discovered box. Empty mac means probed but untraceable, not adoptable yet.
-      required: [ip, mac, known]
+      required: [ip, known]
       properties:
         ip:
           type: string
@@ -668,7 +668,7 @@ components:
           example: 192.168.1.10
         mac:
           type: string
-          pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+          description: Empty when probed but untraceable.
           example: 11:22:33:44:55:66
         hostname:
           type: string
@@ -744,7 +744,7 @@ components:
       properties:
         type:
           type: string
-          enum: [status]
+          enum: [device.status]
         device:
           $ref: '#/components/schemas/Device'
       additionalProperties: false

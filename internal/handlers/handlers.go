@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -28,11 +29,20 @@ type Server struct {
 	sched      *scheduler.Scheduler
 	disc       *discover.Scanner
 	sendWOL    func(mac, broadcast string) error
+	limiter    *requestLimiter
+	adoptLimit *rateLimiter
 }
 
 // New returns a Server sending magic packets via wol.SendWOLPacket.
 func New(cfg *config.Config, store *storage.Storage, hub *wshub.Hub) *Server {
-	return &Server{cfg: cfg, store: store, hub: hub, sendWOL: wol.SendWOLPacket}
+	return &Server{
+		cfg:        cfg,
+		store:      store,
+		hub:        hub,
+		sendWOL:    wol.SendWOLPacket,
+		limiter:    newRequestLimiter(wakeDiscoverCooldown),
+		adoptLimit: newRateLimiter(5, time.Minute),
+	}
 }
 
 // WithHistory wires the wake log; nil keeps the server running without one.
@@ -64,7 +74,11 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, store *storage.Storage, h
 // Mount registers every route. Docs, welcome, and health stay public;
 // everything else requires the API token when one is configured.
 func (s *Server) Mount(r *gin.Engine) {
-	r.Use(securityHeaders())
+	r.Use(gin.Recovery(), securityHeaders(), requestBodyLimit())
+	if origins, err := s.cfg.ParseCORSOrigins(); err == nil {
+		r.Use(corsMiddleware(origins))
+	}
+
 	r.GET("/", s.welcome)
 	r.GET("/health", s.health)
 	r.GET("/docs", s.docs)
@@ -72,10 +86,14 @@ func (s *Server) Mount(r *gin.Engine) {
 
 	guarded := r.Group("/", requireToken(s.cfg.APIToken))
 	guarded.GET("/ws", wshub.Handler(s.hub))
-	guarded.POST("/wake", s.wakeDefault)
-	guarded.GET("/wake", s.wakeDefault)
-	guarded.POST("/wake/:macAddress", s.wakeMAC)
-	guarded.GET("/wake/:macAddress", s.wakeMAC)
+
+	throttled := guarded.Group("/", throttle(s.limiter))
+	throttled.POST("/wake", s.wakeDefault)
+	throttled.GET("/wake", s.wakeDefault)
+	throttled.POST("/wake/:macAddress", s.wakeMAC)
+	throttled.GET("/wake/:macAddress", s.wakeMAC)
+	throttled.POST("/discover", s.scanNetwork)
+
 	guarded.GET("/devices", s.listDevices)
 	guarded.POST("/devices", s.createDevice)
 	guarded.GET("/devices/:id", s.getDevice)
@@ -90,7 +108,6 @@ func (s *Server) Mount(r *gin.Engine) {
 		guarded.DELETE("/schedules/:id", s.deleteSchedule)
 	}
 	if s.disc != nil {
-		guarded.POST("/discover", s.scanNetwork)
 		guarded.POST("/discover/adopt", s.adoptHosts)
 	}
 }

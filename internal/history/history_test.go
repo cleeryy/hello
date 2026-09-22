@@ -1,6 +1,7 @@
 package history
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -68,6 +69,31 @@ func TestHistory_whenReloaded(t *testing.T) {
 	require.Len(t, got, 1)
 	require.Equal(t, saved.ID, got[0].ID)
 	require.Equal(t, models.TriggerSchedule, got[0].Trigger)
+}
+
+func TestHistory_whenSaveFailsRollsBackMemory(t *testing.T) {
+	dir := t.TempDir()
+	h, err := New(filepath.Join(dir, "history.json"))
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	_, err = h.Record(models.WakeEvent{DeviceID: "a", MAC: "00:11:22:33:44:55", Trigger: models.TriggerManual, Success: true})
+
+	require.Error(t, err)
+	require.Empty(t, h.List("", 50))
+}
+
+func TestHistory_persists_file_as_private(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.json")
+	h, err := New(path)
+	require.NoError(t, err)
+	_, err = h.Record(models.WakeEvent{DeviceID: "a", MAC: "00:11:22:33:44:55", Trigger: models.TriggerManual, Success: true})
+	require.NoError(t, err)
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 // TestHistory_whenOverCapacity verifies the ring bound.

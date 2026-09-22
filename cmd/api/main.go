@@ -40,21 +40,31 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if cfg.APIToken == "" {
-		slog.Warn("API_TOKEN unset: API runs open, set a token before exposing it")
+
+	store, err := storage.New(cfg.DevicesFile)
+	if err != nil {
+		return err
 	}
-
-	store := storage.New(cfg.DevicesFile)
-
 	hist, err := history.New(cfg.HistoryFile)
 	if err != nil {
 		return err
 	}
+	schedStore, err := scheduler.NewStore(cfg.SchedulesFile)
+	if err != nil {
+		return err
+	}
+	origins, err := cfg.ParseCORSOrigins()
+	if err != nil {
+		return err
+	}
+	proxies, err := cfg.ParseTrustedProxies()
+	if err != nil {
+		return err
+	}
 
-	hub := wshub.NewHub()
+	hub := wshub.NewHub(origins...)
 	go hub.Run(ctx)
 
-	schedStore := scheduler.NewStore(cfg.SchedulesFile)
 	sch := scheduler.New(schedStore,
 		func(id string) (models.Device, error) {
 			dev, err := store.Get(id)
@@ -66,9 +76,9 @@ func run() error {
 		func(sched models.Schedule, dev models.Device) {
 			errMsg := ""
 			success := true
-			if err := wol.SendWOLPacket(dev.MAC, cfg.BroadcastIP); err != nil {
+			if err := wol.SendWOLPacket(dev.MAC, wol.BroadcastForIP(dev.IP, cfg.BroadcastIP)); err != nil {
 				slog.Error("scheduled wol failed",
-					slog.String("schedule", sched.ID), slog.Any("err", err))
+					slog.String("schedule", sched.ID), slog.String("broadcast", wol.BroadcastForIP(dev.IP, cfg.BroadcastIP)), slog.Any("err", err))
 				errMsg = err.Error()
 				success = false
 			}
@@ -91,16 +101,25 @@ func run() error {
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(gin.Recovery())
-	handlers.New(cfg, store, hub).WithHistory(hist).WithSchedules(schedStore, sch).WithDiscover(discover.New()).Mount(r)
+	if err := r.SetTrustedProxies(proxies); err != nil {
+		return err
+	}
 
 	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              ":" + cfg.Port,
+		Handler:           r,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
+
+	handlers.New(cfg, store, hub).
+		WithHistory(hist).
+		WithSchedules(schedStore, sch).
+		WithDiscover(discover.New()).
+		Mount(r)
+	handlers.RegisterDashboard(r)
 
 	errCh := make(chan error, 1)
 	go func() {

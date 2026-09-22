@@ -35,6 +35,9 @@ go.work.sum
 wake-history.json
 schedules.json
 
+# Tool artefacts (local runs, never committed)
+.omo/
+
 # Editor/IDE
 # .idea/
 # .vscode/

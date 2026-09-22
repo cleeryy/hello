@@ -8,7 +8,8 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /wol-api ./cmd/api
 
-FROM alpine:3.18
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
 WORKDIR /app
 
 COPY --from=builder /wol-api /app/wol-api
