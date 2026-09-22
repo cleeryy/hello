@@ -40,9 +40,13 @@ Read `CONTEXT.md` for the domain language first.
 
 ## Pull requests
 
-- Branch from `master` (`feat/…`, `fix/…`, `docs/…`).
+- Branch from `dev` (`feat/…`, `fix/…`, `docs/…`), open the PR **against
+  `dev`** — never directly against `master`.
+- **Every PR links an issue** (`Closes #NNN` in the body; create the
+  issue first if missing). CI fails the PR otherwise.
 - **Title must follow Conventional Commits** — enforced by CI
-  (`feat:`, `fix:`, `chore:`, `docs:` …).
+  (`feat:`, `fix:`, `chore:`, `docs:` …). Release PRs use
+  `chore(release): vX.Y.Z`.
 - Add labels so release notes land in the right bucket: `feature` /
   `enhancement`, `bug` / `fix` / `bugfix`, `chore`; version with
   `major` / `minor` / `patch` (default `patch`).
