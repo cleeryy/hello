@@ -42,7 +42,13 @@ func Test_Hub_rejects_cross_origin_websocket(t *testing.T) {
 	// When: a browser-like client sends a foreign Origin.
 	header := make(map[string][]string)
 	header["Origin"] = []string{"https://evil.example.com"}
-	_, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "/ws"), header)
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL(srv, "/ws"), header)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 
 	// Then: the handshake is rejected.
 	require.Error(t, err)
@@ -64,18 +70,36 @@ func Test_Hub_broadcasts_status_to_subscriber(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()
 
-	// When: broadcasts race the async registration, so retry until received.
+	// When: each attempt dials fresh and reads at most once, so a lost
+	// race can never poison the next read with a dead connection.
+	want := models.Device{
+		ID: "pc1", Name: "PC", MAC: "00:11:22:33:44:55", Status: models.StatusUp,
+	}
+	tryOnce := func() (wshub.Message, bool) {
+		c, resp, err := websocket.DefaultDialer.Dial(wsURL(srv, "/ws"), nil)
+		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			return wshub.Message{}, false
+		}
+		defer func() { _ = c.Close() }()
+		hub.Broadcast(want)
+		_ = c.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		var got wshub.Message
+		if err := c.ReadJSON(&got); err != nil {
+			return wshub.Message{}, false
+		}
+		return got, true
+	}
+
 	var got wshub.Message
 	gotOne := false
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && !gotOne {
-		hub.Broadcast(models.Device{
-			ID: "pc1", Name: "PC", MAC: "00:11:22:33:44:55", Status: models.StatusUp,
-		})
-		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-		if err := conn.ReadJSON(&got); err == nil {
-			gotOne = true
-		}
+		var ok bool
+		got, ok = tryOnce()
+		gotOne = ok
 	}
 
 	// Then
