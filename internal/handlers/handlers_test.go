@@ -10,6 +10,7 @@ import (
 
 	"github.com/cleeryy/hello/internal/config"
 	"github.com/cleeryy/hello/internal/models"
+	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/storage"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -24,10 +25,24 @@ func TestMain(m *testing.M) {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "devices.json")
-	store := storage.New(path)
+	store := newStorage(t, path)
 	s := New(&config.Config{}, store, nil)
 	s.sendWOL = func(mac, broadcast string) error { return nil }
 	return s
+}
+
+func newStorage(t *testing.T, path string) *storage.Storage {
+	t.Helper()
+	store, err := storage.New(path)
+	require.NoError(t, err)
+	return store
+}
+
+func newScheduleStore(t *testing.T, path string) *scheduler.Store {
+	t.Helper()
+	store, err := scheduler.NewStore(path)
+	require.NoError(t, err)
+	return store
 }
 
 func doRequest(s *Server, method, target string, body any) *httptest.ResponseRecorder {

@@ -46,23 +46,30 @@ func (s *Server) scanNetwork(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"hosts": hosts})
 }
 
-// adoptHosts imports discovery candidates as registry devices. The import is
-// all-or-nothing: one duplicate MAC 409s the whole batch, so a retry never
-// creates half a fleet.
+// adoptHosts imports discovery candidates as registry devices. Validation and
+// duplicate checks happen before one locked, atomic registry write.
 func (s *Server) adoptHosts(c *gin.Context) {
+	if s.adoptLimit != nil && !s.adoptLimit.allow(c.ClientIP()) {
+		c.Header("Retry-After", fmt.Sprint(s.adoptLimit.retryAfter(c.ClientIP())))
+		writeProblem(c, http.StatusTooManyRequests, "too many requests",
+			"adopt rate limit exceeded, retry later", nil)
+		return
+	}
 	var in struct {
 		Hosts []struct {
 			MAC      string `json:"mac" binding:"required"`
 			IP       string `json:"ip"`
 			Name     string `json:"name"`
 			Hostname string `json:"hostname"`
-		} `json:"hosts" binding:"required,min=1"`
+		} `json:"hosts" binding:"required,min=1,max=100"`
 	}
 	if err := c.ShouldBindJSON(&in); err != nil {
 		writeBindingError(c, err)
 		return
 	}
-	devices := make([]models.Device, 0, len(in.Hosts))
+
+	devices := make([]*models.Device, 0, len(in.Hosts))
+	seenMAC := make(map[string]struct{}, len(in.Hosts))
 	for _, h := range in.Hosts {
 		mac, err := net.ParseMAC(h.MAC)
 		if err != nil {
@@ -71,15 +78,22 @@ func (s *Server) adoptHosts(c *gin.Context) {
 				gin.H{"errors": map[string][]string{"hosts": {"each host needs a valid mac"}}})
 			return
 		}
+		canonicalMAC := mac.String()
+		if _, duplicate := seenMAC[canonicalMAC]; duplicate {
+			writeProblem(c, http.StatusUnprocessableEntity, "validation failed",
+				fmt.Sprintf("duplicate mac %q in adoption batch", canonicalMAC), nil)
+			return
+		}
+		seenMAC[canonicalMAC] = struct{}{}
 		if h.IP != "" && net.ParseIP(h.IP) == nil {
 			writeProblem(c, http.StatusUnprocessableEntity, "validation failed",
 				fmt.Sprintf("invalid ip %q", h.IP),
 				gin.H{"errors": map[string][]string{"hosts": {"ip must be a valid address"}}})
 			return
 		}
-		if _, found := s.store.LookupMAC(mac.String()); found {
+		if _, found := s.store.LookupMAC(canonicalMAC); found {
 			writeProblem(c, http.StatusConflict, "already exists",
-				fmt.Sprintf("device with mac %s already exists", mac),
+				fmt.Sprintf("device with mac %s already exists", canonicalMAC),
 				nil)
 			return
 		}
@@ -90,22 +104,20 @@ func (s *Server) adoptHosts(c *gin.Context) {
 		if name == "" {
 			name = "host-" + strings.ReplaceAll(h.IP, ".", "-")
 		}
-		devices = append(devices, models.Device{
-			ID:          "host-" + strings.ReplaceAll(strings.ToLower(mac.String()), ":", ""),
+		devices = append(devices, &models.Device{
+			ID:          "host-" + strings.ReplaceAll(strings.ToLower(canonicalMAC), ":", ""),
 			Name:        name,
-			MAC:         mac.String(),
+			MAC:         canonicalMAC,
 			IP:          h.IP,
 			Status:      models.StatusUnknown,
 			PingEnabled: h.IP != "",
 		})
 	}
-	created := make([]models.Device, 0, len(devices))
-	for i := range devices {
-		if err := s.store.Create(&devices[i]); err != nil {
-			writeErr(c, err)
-			return
-		}
-		created = append(created, devices[i])
+
+	created, err := s.store.CreateMany(devices)
+	if err != nil {
+		writeErr(c, err)
+		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"devices": created})
 }

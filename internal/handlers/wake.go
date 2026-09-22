@@ -9,14 +9,22 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/cleeryy/hello/internal/models"
+	"github.com/cleeryy/hello/internal/wol"
 )
 
 func (s *Server) wakeDefault(c *gin.Context) {
-	s.sendMagic(c, s.cfg.DefaultMAC)
+	s.sendMagic(c, s.cfg.DefaultMAC, s.cfg.BroadcastIP)
 }
 
 func (s *Server) wakeMAC(c *gin.Context) {
-	s.sendMagic(c, c.Param("macAddress"))
+	mac := c.Param("macAddress")
+	broadcast := s.cfg.BroadcastIP
+	if id, found := s.store.LookupMAC(mac); found {
+		if dev, err := s.store.Get(id); err == nil {
+			broadcast = wol.BroadcastForIP(dev.IP, s.cfg.BroadcastIP)
+		}
+	}
+	s.sendMagic(c, mac, broadcast)
 }
 
 func (s *Server) wakeDevice(c *gin.Context) {
@@ -25,17 +33,17 @@ func (s *Server) wakeDevice(c *gin.Context) {
 		writeErr(c, err)
 		return
 	}
-	s.sendMagic(c, device.MAC)
+	s.sendMagic(c, device.MAC, wol.BroadcastForIP(device.IP, s.cfg.BroadcastIP))
 }
 
-func (s *Server) sendMagic(c *gin.Context, mac string) {
+func (s *Server) sendMagic(c *gin.Context, mac, broadcastIP string) {
 	if _, err := net.ParseMAC(mac); err != nil {
 		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
 			fmt.Sprintf("invalid mac address %q", mac), nil)
 		return
 	}
-	if err := s.sendWOL(mac, s.cfg.BroadcastIP); err != nil {
-		slog.Error("wol send failed", slog.String("mac", mac), slog.Any("err", err))
+	if err := s.sendWOL(mac, broadcastIP); err != nil {
+		slog.Error("wol send failed", slog.String("mac", mac), slog.String("broadcast", broadcastIP), slog.Any("err", err))
 		s.recordWake(mac, false, err.Error())
 		writeProblem(c, http.StatusInternalServerError, "internal error",
 			"failed to send magic packet", nil)

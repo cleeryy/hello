@@ -131,7 +131,7 @@ curl "http://localhost:8080/history?device_id=pc-salon&limit=20"
 GET /ws
 ```
 
-WebSocket broadcasting `{ "type": "status", "device": { ... } }` every time
+WebSocket broadcasting `{ "type": "device.status", "device": { ... } }` every time
 the monitor observes a status change.
 
 **Example:**
@@ -141,7 +141,7 @@ curl http://localhost:8080/wake/AA:BB:CC:DD:EE:FF
 curl -X POST http://localhost:8080/devices/pc-salon/wake
 ```
 
-A full walkthrough lives in `test-api.sh` (requires `jq` and a running server).
+A full walkthrough lives in `test-api.sh` (requires `jq`, a running server, and `API_TOKEN`).
 
 ### 7. Schedules
 
@@ -227,18 +227,20 @@ replacement, `DELETE` returns `204 No Content`.
 | `BROADCAST_IP`        | no       | `255.255.255.255` | Subnet broadcast for magic packets |
 | `DEVICES_FILE`        | no       | `devices.json`    | Device registry file               |
 | `MONITOR_INTERVAL_SEC`| no       | `30`              | Status poll interval in seconds    |
-| `API_TOKEN`           | no       | *(open mode)*     | Bearer token locking the API       |
+| `API_TOKEN`           | yes      | -                 | Bearer token (min 16 chars, never `change-me`) |
 | `HISTORY_FILE`        | no       | `wake-history.json` | Wake log file                    |
 | `SCHEDULES_FILE`      | no       | `schedules.json` | Wake schedules file               |
+| `TRUSTED_PROXIES`     | no       | `127.0.0.1,::1` | Reverse-proxy IPs/CIDRs for `X-Forwarded-For` |
+| `CORS_ORIGINS`        | no       | *(same-origin)* | Extra browser origins, comma-separated |
 
 Or create a `.env` file in the project root (see `.env.example`).
 
 ## Authentication
 
-Set `API_TOKEN` to lock every route behind `Authorization: Bearer <token>`.
-Without it the server runs open — fine on localhost, never expose that.
-`GET /health`, `/`, `/docs`, and `/openapi.yaml` stay public so probes and
-docs keep working; browsers calling `/ws` pass `?token=` instead of a header.
+`API_TOKEN` is required (min 16 chars, `change-me` rejected). Every route except
+`GET /health`, `/`, `/docs`, and `/openapi.yaml` requires `Authorization: Bearer <token>`.
+Browsers calling `/ws` should prefer the header; `?token=` still works for compat
+but leaks in proxy logs, so avoid it.
 
 ```bash
 curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8080/devices
@@ -250,15 +252,17 @@ curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8080/devices
 hello/
 ├── cmd/api/             # Binary entrypoint (graceful shutdown)
 ├── internal/
-│   ├── config/          # Env-based configuration
-│   ├── handlers/        # HTTP routes (wake + devices CRUD)
+│   ├── config/          # Env-based configuration + validation
+│   ├── handlers/        # HTTP routes (wake, devices, history, schedules, discover, ws + CORS/throttle)
 │   ├── history/         # Wake log (ring buffer + persistence)
 │   ├── scheduler/       # Wake schedules (cron runner + file store)
-│   ├── models/          # Device type + validation
+│   ├── models/          # Device/Schedule/WakeEvent + validation
 │   ├── monitor/         # Background ping monitor
 │   ├── ping/            # ICMP/TCP ping helpers
 │   ├── storage/         # File-backed device registry
-│   ├── websocket/       # Live-status hub (/ws)
+│   ├── discover/        # LAN scan + adopt
+│   ├── websocket/       # Live-status hub (/ws, strict origin)
+│   ├── spec/            # Embedded OpenAPI + Swagger UI
 │   └── wol/             # Wake-on-LAN packet sender
 ├── devices.example.json # Sample registry (copy to devices.json)
 ├── Dockerfile           # Multi-stage Docker build
@@ -300,9 +304,29 @@ golangci-lint run ./...
 
 ## Security Notes
 
-- This API doesn't include authentication - consider adding it for production use
-- Keep your `.env` file private and never commit it to version control
-- Consider running this service only on your local network
+- `API_TOKEN` is mandatory (min 16 chars); the server refuses to boot without it
+- Keep your `.env` file private and never commit it; rotate the token by restart
+- `?token=` on `/ws` is deprecated (leaks in proxy logs), prefer the `Authorization` header
+- CORS defaults to same-origin; set `CORS_ORIGINS` only for explicit browser origins
+- WebSocket origin is locked to same-origin + `CORS_ORIGINS`
+- Wake (`10/min/IP`) and adopt (`5/min/IP`) are throttled with `429` + `Retry-After`; discovery keeps its 30s global cooldown
+- JSON files are written `0600` mono-instance; mount all three in Compose
+
+## Reverse proxy (Caddy + generic)
+
+TLS terminates at the proxy. Trust only its IPs via `TRUSTED_PROXIES`, forward
+`X-Forwarded-For/Proto/Host`, and strip incoming forwarding headers from clients.
+
+```caddy
+# Caddyfile (same host)
+lan.example.com {
+  reverse_proxy 127.0.0.1:8080
+}
+# env: TRUSTED_PROXIES=127.0.0.1/32,::1/128 CORS_ORIGINS=https://lan.example.com
+```
+
+Generic Nginx/Traefik: same env pattern, allowlist `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`
+via `TRUSTED_PROXIES` when the proxy is on LAN.
 
 ## License
 

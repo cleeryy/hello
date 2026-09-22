@@ -13,6 +13,13 @@ import (
 	"github.com/cleeryy/hello/internal/storage"
 )
 
+func newStorage(t *testing.T, path string) *storage.Storage {
+	t.Helper()
+	store, err := storage.New(path)
+	require.NoError(t, err)
+	return store
+}
+
 func testDevice(id string) *models.Device {
 	return &models.Device{
 		ID: id, Name: "PC " + id, MAC: "00:11:22:33:44:55",
@@ -22,7 +29,7 @@ func testDevice(id string) *models.Device {
 
 func Test_Storage_Create_and_Get_roundtrip(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 
 	// When
 	require.NoError(t, s.Create(testDevice("pc1")))
@@ -36,7 +43,7 @@ func Test_Storage_Create_and_Get_roundtrip(t *testing.T) {
 
 func Test_Storage_Create_rejects_duplicate(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	require.NoError(t, s.Create(testDevice("pc1")))
 
 	// When
@@ -48,7 +55,7 @@ func Test_Storage_Create_rejects_duplicate(t *testing.T) {
 
 func Test_Storage_Create_rejects_invalid_device(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	bad := testDevice("pc1")
 	bad.MAC = "bogus"
 
@@ -61,7 +68,7 @@ func Test_Storage_Create_rejects_invalid_device(t *testing.T) {
 
 func Test_Storage_Get_returns_copy(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	require.NoError(t, s.Create(testDevice("pc1")))
 
 	// When
@@ -77,7 +84,7 @@ func Test_Storage_Get_returns_copy(t *testing.T) {
 
 func Test_Storage_Get_missing_returns_not_found(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 
 	// When
 	_, err := s.Get("nope")
@@ -88,7 +95,7 @@ func Test_Storage_Get_missing_returns_not_found(t *testing.T) {
 
 func Test_Storage_Update_and_Delete(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	require.NoError(t, s.Create(testDevice("pc1")))
 
 	// When
@@ -115,11 +122,11 @@ func Test_Storage_Update_and_Delete(t *testing.T) {
 func Test_Storage_persists_across_reload(t *testing.T) {
 	// Given
 	path := filepath.Join(t.TempDir(), "devices.json")
-	s := storage.New(path)
+	s := newStorage(t, path)
 	require.NoError(t, s.Create(testDevice("pc1")))
 
 	// When
-	reloaded := storage.New(path)
+	reloaded := newStorage(t, path)
 	got, err := reloaded.Get("pc1")
 
 	// Then
@@ -131,18 +138,48 @@ func Test_Storage_Load_rejects_corrupt_file(t *testing.T) {
 	// Given
 	path := filepath.Join(t.TempDir(), "devices.json")
 	require.NoError(t, os.WriteFile(path, []byte("{oops"), 0o644))
-	s := storage.New(path)
 
 	// When
-	err := s.Load()
+	_, err := storage.New(path)
 
 	// Then
 	require.Error(t, err)
 }
 
+func Test_Storage_CreateMany_is_atomic_on_save_failure(t *testing.T) {
+	// Given
+	dir := t.TempDir()
+	s := newStorage(t, filepath.Join(dir, "devices.json"))
+	require.NoError(t, s.Create(testDevice("pc1")))
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	// When
+	created, err := s.CreateMany([]*models.Device{testDevice("pc2")})
+
+	// Then: memory and disk remain unchanged.
+	require.Error(t, err)
+	require.Nil(t, created)
+	require.Len(t, s.GetAll(), 1)
+	_, err = s.Get("pc2")
+	require.ErrorIs(t, err, storage.ErrNotFound)
+	reloaded := newStorage(t, filepath.Join(dir, "devices.json"))
+	require.Len(t, reloaded.GetAll(), 1)
+}
+
+func Test_Storage_persists_files_as_private(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "devices.json")
+	s := newStorage(t, path)
+	require.NoError(t, s.Create(testDevice("pc1")))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
 func Test_Storage_concurrent_access(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	require.NoError(t, s.Create(testDevice("pc1")))
 
 	// When
@@ -163,7 +200,7 @@ func Test_Storage_concurrent_access(t *testing.T) {
 
 func Test_Storage_LookupMAC_resolves_id(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	require.NoError(t, s.Create(testDevice("pc1")))
 
 	// When

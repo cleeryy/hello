@@ -9,14 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/cleeryy/hello/internal/config"
-	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
 )
 
 func mountWithToken(t *testing.T, token string) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	store := storage.New(t.TempDir() + "/devices.json")
+	store := newStorage(t, t.TempDir()+"/devices.json")
 	srv := New(&config.Config{
 		DefaultMAC:  "AA:BB:CC:DD:EE:FF",
 		BroadcastIP: "255.255.255.255",
@@ -109,4 +108,41 @@ func TestAuth_whenHealthRequested(t *testing.T) {
 	res := rec.Result()
 	defer func() { _ = res.Body.Close() }()
 	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestAuth_whenBearerSchemeHasWrongCase(t *testing.T) {
+	engine := mountWithToken(t, "s3cret")
+	req := httptest.NewRequest(http.MethodGet, "/devices", nil)
+	req.Header.Set("Authorization", "bearer s3cret")
+	rec := httptest.NewRecorder()
+
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestAuth_whenWebSocketProtocolTokenIsValid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/ws", requireToken("s3cret"), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Header.Set("Sec-WebSocket-Protocol", "s3cret")
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestAuth_whenDeprecatedWebSocketQueryTokenIsUsed(t *testing.T) {
+	engine := mountWithToken(t, "s3cret")
+	req := httptest.NewRequest(http.MethodGet, "/ws?token=s3cret", nil)
+	rec := httptest.NewRecorder()
+
+	engine.ServeHTTP(rec, req)
+
+	// The hub is nil in this focused auth test, but authentication must pass.
+	require.NotEqual(t, http.StatusUnauthorized, rec.Code)
 }

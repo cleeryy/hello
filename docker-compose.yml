@@ -7,11 +7,16 @@ services:
       - "8080:8080"
     env_file: .env
     environment:
-      DEVICES_FILE: /app/devices.json
+      DEVICES_FILE: /data/devices.json
+      HISTORY_FILE: /data/wake-history.json
+      SCHEDULES_FILE: /data/schedules.json
     volumes:
-      - ./devices.json:/app/devices.json
+      - hello-data:/data
     restart: unless-stopped
     # NOTE: magic packets use subnet broadcast, which does not cross Docker's
     # bridge network. If wake-ups never arrive, run with network_mode: host
     # (Linux only) instead of the ports mapping above.
     # network_mode: host
+
+volumes:
+  hello-data:

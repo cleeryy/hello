@@ -14,7 +14,6 @@ import (
 	"github.com/cleeryy/hello/internal/config"
 	"github.com/cleeryy/hello/internal/models"
 	"github.com/cleeryy/hello/internal/scheduler"
-	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
 )
 
@@ -22,10 +21,10 @@ func scheduleRouter(t *testing.T) (*gin.Engine, *scheduler.Scheduler) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{BroadcastIP: "255.255.255.255"}
-	devStore := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	devStore := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	err := devStore.Create(&models.Device{ID: "pc", Name: "PC", MAC: "00:11:22:33:44:55"})
 	require.NoError(t, err)
-	schedStore := scheduler.NewStore(filepath.Join(t.TempDir(), "schedules.json"))
+	schedStore := newScheduleStore(t, filepath.Join(t.TempDir(), "schedules.json"))
 	sch := scheduler.New(schedStore,
 		func(id string) (models.Device, error) {
 			dev, err := devStore.Get(id)

@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 
 func TestScheduler_whenTickFires(t *testing.T) {
 	// Given: a scheduler with one per-second schedule and a recording fire
-	st := scheduler.NewStore(filepath.Join(t.TempDir(), "schedules.json"))
+	st := newScheduleStore(t, filepath.Join(t.TempDir(), "schedules.json"))
 	_, err := st.Create(models.Schedule{ID: "tick", DeviceID: "pc", Cron: "@every 1s"})
 	require.NoError(t, err)
 	var mu sync.Mutex
@@ -51,7 +51,7 @@ func TestScheduler_whenTickFires(t *testing.T) {
 
 func TestScheduler_whenReloadReflectsStore(t *testing.T) {
 	// Given: a scheduler on an empty store
-	st := scheduler.NewStore(filepath.Join(t.TempDir(), "schedules.json"))
+	st := newScheduleStore(t, filepath.Join(t.TempDir(), "schedules.json"))
 	sch := scheduler.New(st,
 		func(id string) (models.Device, error) {
 			return models.Device{ID: id}, nil
@@ -79,7 +79,7 @@ func TestScheduler_whenReloadReflectsStore(t *testing.T) {
 
 func TestScheduler_whenDeviceGone(t *testing.T) {
 	// Given: a schedule whose device vanished, fire must not run
-	st := scheduler.NewStore(filepath.Join(t.TempDir(), "schedules.json"))
+	st := newScheduleStore(t, filepath.Join(t.TempDir(), "schedules.json"))
 	_, err := st.Create(models.Schedule{ID: "ghost", DeviceID: "gone", Cron: "@every 1s"})
 	require.NoError(t, err)
 	calls := make(chan struct{}, 10)

@@ -19,9 +19,16 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
 }
 
+func newStorage(t *testing.T, path string) *storage.Storage {
+	t.Helper()
+	store, err := storage.New(path)
+	require.NoError(t, err)
+	return store
+}
+
 func Test_Monitor_emits_status_change_on_start(t *testing.T) {
 	// Given — 192.0.2.1 is TEST-NET-1, guaranteed unroutable: PingHost is false.
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	require.NoError(t, s.Create(&models.Device{
 		ID: "pc1", Name: "PC", MAC: "00:11:22:33:44:55",
 		Status: models.StatusUnknown, IP: "192.0.2.1", PingEnabled: true,
@@ -48,7 +55,7 @@ func Test_Monitor_emits_status_change_on_start(t *testing.T) {
 
 func Test_Monitor_skips_devices_without_ping(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	require.NoError(t, s.Create(&models.Device{
 		ID: "pc1", Name: "PC", MAC: "00:11:22:33:44:55",
 		Status: models.StatusUnknown, IP: "192.0.2.1", PingEnabled: false,
@@ -76,7 +83,7 @@ func Test_Monitor_skips_devices_without_ping(t *testing.T) {
 
 func Test_Monitor_Stop_is_idempotent(t *testing.T) {
 	// Given
-	s := storage.New(filepath.Join(t.TempDir(), "devices.json"))
+	s := newStorage(t, filepath.Join(t.TempDir(), "devices.json"))
 	mon := monitor.New(s, time.Hour)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
