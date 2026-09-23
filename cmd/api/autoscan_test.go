@@ -9,10 +9,20 @@ import (
 	"github.com/cleeryy/hello/internal/discover"
 )
 
-// Given: a scanner pinned to an oversized subnet
-// When: running autoScan briefly
-// Then: ticks fail fast with a warning and cancel stops the loop.
+// Given: the seed file helper
+// When: DEVICES_FILE is set or not
+// Then: env wins, default follows.
+func TestSeedFile(t *testing.T) {
+	t.Setenv("DEVICES_FILE", "custom.json")
+	if got := seedFile(); got != "custom.json" {
+		t.Fatalf("seedFile = %q", got)
+	}
+}
+
 func TestAutoScan_errorAndDone(t *testing.T) {
+	// Given: a scanner pinned to an oversized subnet
+	// When: running autoScan briefly
+	// Then: ticks fail fast with a warning and cancel stops the loop.
 	d := discover.New()
 	_, subnet, err := net.ParseCIDR("10.0.0.0/8")
 	if err != nil {

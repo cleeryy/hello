@@ -87,6 +87,16 @@ func TestListHistoryBadLimit(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// Given: a server without a scanner
+// When: POSTing a discovery scan
+// Then: 503 (not-configured branch).
+func TestScanNetworkNoScanner(t *testing.T) {
+	s := newTestServer(t)
+
+	w := doRequest(s, http.MethodPost, "/discover", nil)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
 // Given: a schedule whose device was deleted
 // When: firing it manually
 // Then: 422 (unknown-target branch of fireScheduleNow).
