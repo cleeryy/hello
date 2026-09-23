@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"syscall"
@@ -29,7 +28,7 @@ func TestRunStartsAndStops(t *testing.T) {
 		resp, err := http.Get("http://localhost:18099/health")
 		if err == nil {
 			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			up = resp.StatusCode == http.StatusOK && len(body) > 0
 		}
 		if !up {
@@ -40,7 +39,7 @@ func TestRunStartsAndStops(t *testing.T) {
 		t.Fatal("server never came up")
 	}
 	if err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM); err != nil {
-		t.Fatal(fmt.Sprintf("signal self: %v", err))
+		t.Fatalf("signal self: %v", err)
 	}
 	select {
 	case err := <-errCh:
