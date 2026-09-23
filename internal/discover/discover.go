@@ -185,6 +185,11 @@ func (s *Scanner) sweepSubnet(ctx context.Context, subnet *net.IPNet) ([]Host, e
 		merged[ip] = &Host{IP: ip, MAC: byMAC[ip]}
 	}
 	for ip, mac := range byMAC {
+		// ARP is host-wide: only merge entries inside the swept subnet so
+		// explicit-CIDR scans never report out-of-range hosts.
+		if parsed := net.ParseIP(ip); parsed == nil || !subnet.Contains(parsed) {
+			continue
+		}
 		if h, ok := merged[ip]; ok {
 			h.MAC = mac
 		} else {
