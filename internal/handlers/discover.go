@@ -26,15 +26,9 @@ func (s *Server) scanNetwork(c *gin.Context) {
 			"discovery is not configured", nil)
 		return
 	}
-	var subnet *net.IPNet
-	if raw := strings.TrimSpace(c.Query("cidr")); raw != "" {
-		_, parsed, err := net.ParseCIDR(raw)
-		if err != nil {
-			writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
-				fmt.Sprintf("invalid cidr %q", raw), nil)
-			return
-		}
-		subnet = parsed
+	var subnet, ok = querySubnet(c)
+	if !ok {
+		return
 	}
 	hosts, ok := s.runScan(c, subnet)
 	if !ok {
@@ -45,6 +39,21 @@ func (s *Server) scanNetwork(c *gin.Context) {
 		_, hosts[i].Known = s.store.LookupMAC(hosts[i].MAC)
 	}
 	c.JSON(http.StatusOK, gin.H{"hosts": hosts, "ignored": ignored})
+}
+
+// querySubnet parses an optional ?cidr= override. It reports false when it
+// already answered with a 422.
+func querySubnet(c *gin.Context) (*net.IPNet, bool) {
+	if raw := strings.TrimSpace(c.Query("cidr")); raw != "" {
+		_, parsed, err := net.ParseCIDR(raw)
+		if err != nil {
+			writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+				fmt.Sprintf("invalid cidr %q", raw), nil)
+			return nil, false
+		}
+		return parsed, true
+	}
+	return nil, true
 }
 
 // runScan executes one sweep over subnet (nil for auto-detect) and maps
@@ -252,7 +261,11 @@ func (s *Server) buildAdoptDevices(c *gin.Context, hosts []discover.Host) []*mod
 // adoptAll scans (auto-detected subnet) then adopts every new candidate with
 // a MAC. Already known, ignored, or MAC-less hosts are skipped and counted.
 func (s *Server) adoptAll(c *gin.Context) {
-	hosts, ok := s.runScan(c, nil)
+	subnet, ok := querySubnet(c)
+	if !ok {
+		return
+	}
+	hosts, ok := s.runScan(c, subnet)
 	if !ok {
 		return
 	}

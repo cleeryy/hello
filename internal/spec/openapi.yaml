@@ -1197,6 +1197,13 @@ paths:
         candidate with a MAC that is neither known nor ignored. MAC-less,
         known, and ignored hosts are skipped and counted.
       operationId: adoptAll
+      parameters:
+        - name: cidr
+          in: query
+          description: Explicit range to sweep, e.g. 192.168.2.0/24
+          schema:
+            type: string
+            example: 192.168.2.0/24
       responses:
         '201':
           description: Adoption report, devices may be empty when nothing is new

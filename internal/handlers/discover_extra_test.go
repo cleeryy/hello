@@ -158,15 +158,17 @@ func TestAdoptTags(t *testing.T) {
 }
 
 // Given: a listener on loopback and no MAC-bearing hosts
-// When: POSTing /discover/adopt-all
-// Then: 201 with empty devices and honest counts.
+// When: POSTing /discover/adopt-all?cidr=127.0.0.1/30
+// Then: 201 with empty devices and honest counts. The explicit CIDR keeps
+// the test hermetic: a bare adopt-all would scan the real LAN and flake
+// wherever a gateway answers (seen on CI runners).
 func TestAdoptAll(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer func() { _ = ln.Close() }()
 	r := discoverFullRouter(t, ln.Addr().(*net.TCPAddr).Port, "")
 
-	w := doPOST(t, r, "/discover/adopt-all", "")
+	w := doPOST(t, r, "/discover/adopt-all?cidr=127.0.0.1/30", "")
 	require.Equal(t, http.StatusCreated, w.Code)
 	var body struct {
 		Devices []any `json:"devices"`
