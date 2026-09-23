@@ -17,6 +17,7 @@ import (
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
 	"github.com/cleeryy/hello/internal/monitor"
+	"github.com/cleeryy/hello/internal/ping"
 	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
@@ -40,6 +41,28 @@ func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal", slog.Any("err", err))
 		os.Exit(1)
+	}
+}
+
+// autoScan runs a LAN sweep on a cadence until ctx ends. A failed sweep is
+// logged, never fatal: discovery is best-effort onboarding.
+func autoScan(ctx context.Context, disc *discover.Scanner, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			scanCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+			hosts, err := disc.Scan(scanCtx)
+			cancel()
+			if err != nil {
+				slog.Warn("auto-scan failed", slog.Any("err", err))
+				continue
+			}
+			slog.Info("auto-scan finished", slog.Int("hosts", len(hosts)))
+		}
 	}
 }
 
@@ -73,6 +96,21 @@ func run() error {
 	proxies, err := cfg.ParseTrustedProxies()
 	if err != nil {
 		return err
+	}
+	ignore, err := discover.LoadIgnoreList(cfg.IgnoredFile)
+	if err != nil {
+		return err
+	}
+	probePorts, err := cfg.ParseProbePorts()
+	if err != nil {
+		return err
+	}
+	tcpPorts, err := cfg.ParsePingTCPPorts()
+	if err != nil {
+		return err
+	}
+	if len(tcpPorts) > 0 {
+		ping.TCPPorts = tcpPorts
 	}
 
 	hub := wshub.NewHub(origins...)
@@ -113,10 +151,23 @@ func run() error {
 		})
 	go sch.Start(ctx)
 
-	mon := monitor.New(store, cfg.MonitorInterval)
+	mon := monitor.NewWithTimeout(store, cfg.MonitorInterval, time.Duration(cfg.PingTimeoutSec)*time.Second)
 	mon.OnStatusChange = hub.Broadcast
 	mon.Start(ctx)
 	defer mon.Stop()
+
+	disc := discover.New()
+	disc.SetCooldown(time.Duration(cfg.DiscoverCooldownSec) * time.Second)
+	disc.Concurrency = cfg.DiscoverConcurrency
+	if len(probePorts) > 0 {
+		disc.ProbePorts = probePorts
+	}
+	if !cfg.DiscoverResolve {
+		disc.ResolveHostname = nil
+	}
+	if cfg.DiscoverIntervalSec > 0 {
+		go autoScan(ctx, disc, time.Duration(cfg.DiscoverIntervalSec)*time.Second)
+	}
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -136,7 +187,9 @@ func run() error {
 	handlers.New(cfg, store, hub).
 		WithHistory(hist).
 		WithSchedules(schedStore, sch).
-		WithDiscover(discover.New()).
+		WithDiscover(disc).
+		WithIgnoreList(ignore).
+		WithMonitor(mon).
 		Mount(r)
 	handlers.RegisterDashboard(r)
 

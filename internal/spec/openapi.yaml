@@ -1090,8 +1090,17 @@ paths:
       description: >-
         TCP-probes the local /24 then maps live IPs to MACs via the OS ARP
         table. One scan at a time with a 30s cooldown; concurrent or early
-        rescans get 429 with a Retry-After hint. No root required.
+        rescans get 429 with a Retry-After hint. ?cidr= scans an explicit
+        range instead of the auto-detected subnet. Ignored addresses are
+        filtered out and counted. No root required.
       operationId: scanNetwork
+      parameters:
+        - name: cidr
+          in: query
+          description: Explicit range to sweep, e.g. 192.168.2.0/24
+          schema:
+            type: string
+            example: 192.168.2.0/24
       responses:
         '200':
           description: Discovered candidates, known flags the registry
@@ -1116,6 +1125,18 @@ paths:
         never creates half a fleet. Names default to the hostname, else
         host-<ip>.
       operationId: adoptHosts
+      parameters:
+        - name: dry_run
+          in: query
+          description: Validate only, persist nothing, answer 200 with a preview
+          schema:
+            type: boolean
+        - name: tags
+          in: query
+          description: Comma-separated tags applied to every created device
+          schema:
+            type: string
+            example: lab,servers
       requestBody:
         required: true
         content:
@@ -1123,6 +1144,12 @@ paths:
             schema:
               $ref: '#/components/schemas/AdoptInput'
       responses:
+        '200':
+          description: Dry-run preview, nothing persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdoptPreview'
         '201':
           description: Devices created
           content:
@@ -1145,6 +1172,217 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ValidationProblem'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /discover/status:
+    get:
+      tags: [Discovery]
+      summary: Scanner guards and latest scan
+      operationId: discoverStatus
+      responses:
+        '200':
+          description: Live guard state plus latest finished scan outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoverStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /discover/adopt-all:
+    post:
+      tags: [Discovery]
+      summary: Scan then adopt every new candidate
+      description: >-
+        Runs one sweep (same throttle as POST /discover) then adopts every
+        candidate with a MAC that is neither known nor ignored. MAC-less,
+        known, and ignored hosts are skipped and counted.
+      operationId: adoptAll
+      parameters:
+        - name: cidr
+          in: query
+          description: Explicit range to sweep, e.g. 192.168.2.0/24
+          schema:
+            type: string
+            example: 192.168.2.0/24
+      responses:
+        '201':
+          description: Adoption report, devices may be empty when nothing is new
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdoptAllResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Bad candidate data, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ValidationProblem'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /discover/ignore:
+    get:
+      tags: [Discovery]
+      summary: List ignored addresses
+      operationId: listIgnore
+      responses:
+        '200':
+          description: Denylisted MACs and IPs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoreList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Discovery]
+      summary: Ignore one address
+      description: At least one of mac or ip is required. Both are stored when both are given.
+      operationId: addIgnore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IgnoreEntry'
+      responses:
+        '201':
+          description: Ignore entry stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoreResult'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Bad MAC or IP, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [Discovery]
+      summary: Unignore one address
+      operationId: deleteIgnore
+      parameters:
+        - name: mac
+          in: query
+          schema:
+            type: string
+        - name: ip
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Entry removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoreResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Bad MAC or IP, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /monitor/check:
+    post:
+      tags: [Monitor]
+      summary: Poll every device now
+      operationId: checkMonitor
+      responses:
+        '200':
+          description: Immediate polling pass outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /monitor/transitions:
+    get:
+      tags: [Monitor]
+      summary: Latest reachability changes
+      operationId: monitorTransitions
+      responses:
+        '200':
+          description: Up to 20 transitions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionsResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /monitor/uptime:
+    get:
+      tags: [Monitor]
+      summary: Per-device poll uptime
+      operationId: monitorUptime
+      responses:
+        '200':
+          description: Up/total poll counts since process start
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UptimeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /monitor/flapping:
+    get:
+      tags: [Monitor]
+      summary: Devices flapping now
+      operationId: monitorFlapping
+      responses:
+        '200':
+          description: Devices with 4+ transitions in the trailing 5 minutes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlappingResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /monitor/status:
+    get:
+      tags: [Monitor]
+      summary: Monitor tuning and latest pass
+      operationId: monitorStatus
+      responses:
+        '200':
+          description: Interval, timeout, and latest pass counters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitorStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /version:
+    get:
+      tags: [System]
+      summary: Build version
+      operationId: version
+      responses:
+        '200':
+          description: Version string, dev unless release-built
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Version'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 components:
   parameters:
     MacAddress:
@@ -1211,6 +1449,10 @@ components:
           type: integer
           format: int64
           description: Unix timestamp of the last successful wake, absent if never
+        monitor_secs:
+          type: integer
+          minimum: 0
+          description: Per-device monitor cadence in seconds, 0 follows the global interval
       additionalProperties: false
     DeviceInput:
       type: object
@@ -1245,6 +1487,10 @@ components:
           maxItems: 10
           items:
             type: string
+        monitor_secs:
+          type: integer
+          minimum: 0
+          description: Per-device monitor cadence in seconds, 0 follows the global interval
       additionalProperties: false
     DeviceStatus:
       type: string
@@ -1530,12 +1776,183 @@ components:
       additionalProperties: false
     DiscoverResult:
       type: object
-      required: [hosts]
+      required: [hosts, ignored]
       properties:
         hosts:
           type: array
           items:
             $ref: '#/components/schemas/Host'
+        ignored:
+          type: integer
+          description: Hosts filtered out by the ignore list
+      additionalProperties: false
+    DiscoverStatus:
+      type: object
+      required: [scanning, retry_in_s, last_scan_at, last_hosts]
+      properties:
+        scanning:
+          type: boolean
+        retry_in_s:
+          type: integer
+          description: Seconds before another scan is accepted, 0 when idle
+        last_scan_at:
+          type: integer
+          format: int64
+          description: Unix timestamp of the latest finished scan, 0 if none
+        last_hosts:
+          type: integer
+        last_error:
+          type: string
+      additionalProperties: false
+    AdoptPreview:
+      type: object
+      required: [devices, dry_run]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+        dry_run:
+          type: boolean
+          enum: [true]
+      additionalProperties: false
+    AdoptAllResult:
+      type: object
+      required: [devices, scanned, skipped, ignored]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+        scanned:
+          type: integer
+          description: Hosts seen by the sweep
+        skipped:
+          type: integer
+          description: MAC-less or already known hosts left alone
+        ignored:
+          type: integer
+          description: Hosts filtered out by the ignore list
+      additionalProperties: false
+    IgnoreEntry:
+      type: object
+      description: At least one of mac or ip is required
+      properties:
+        mac:
+          type: string
+          example: 11:22:33:44:55:66
+        ip:
+          type: string
+          format: ipv4
+          example: 192.168.1.99
+      additionalProperties: false
+    IgnoreList:
+      type: object
+      required: [ignored]
+      properties:
+        ignored:
+          type: array
+          items:
+            $ref: '#/components/schemas/IgnoreEntry'
+      additionalProperties: false
+    IgnoreResult:
+      type: object
+      properties:
+        ignored:
+          $ref: '#/components/schemas/IgnoreEntry'
+        created:
+          type: boolean
+        removed:
+          type: boolean
+      additionalProperties: false
+    CheckResult:
+      type: object
+      required: [checked, changed]
+      properties:
+        checked:
+          type: integer
+        changed:
+          type: integer
+      additionalProperties: false
+    Transition:
+      type: object
+      required: [device_id, from, to, at]
+      properties:
+        device_id:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        at:
+          type: integer
+          format: int64
+      additionalProperties: false
+    TransitionsResult:
+      type: object
+      required: [transitions]
+      properties:
+        transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transition'
+      additionalProperties: false
+    UptimeEntry:
+      type: object
+      required: [device_id, up, total, percent]
+      properties:
+        device_id:
+          type: string
+        up:
+          type: integer
+        total:
+          type: integer
+        percent:
+          type: number
+          description: 100 * up / total
+      additionalProperties: false
+    UptimeResult:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/UptimeEntry'
+      additionalProperties: false
+    FlappingResult:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    MonitorStatus:
+      type: object
+      required: [interval_seconds, timeout_seconds, last_run, last_checked, last_changed]
+      properties:
+        interval_seconds:
+          type: integer
+        timeout_seconds:
+          type: integer
+        last_run:
+          type: integer
+          format: int64
+          description: Unix timestamp of the latest pass, 0 if none
+        last_checked:
+          type: integer
+        last_changed:
+          type: integer
+      additionalProperties: false
+    Version:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: string
+          example: v1.2.0
       additionalProperties: false
     AdoptInput:
       type: object
@@ -1574,11 +1991,38 @@ components:
       additionalProperties: false
     Health:
       type: object
-      required: [status]
+      required: [status, version, uptime_seconds, devices, schedules, history_size]
       properties:
         status:
           type: string
           enum: [ok]
+        version:
+          type: string
+          example: dev
+        uptime_seconds:
+          type: integer
+        devices:
+          type: object
+          required: [total, up, down, unknown]
+          properties:
+            total:
+              type: integer
+            up:
+              type: integer
+            down:
+              type: integer
+            unknown:
+              type: integer
+        schedules:
+          type: object
+          required: [total, enabled]
+          properties:
+            total:
+              type: integer
+            enabled:
+              type: integer
+        history_size:
+          type: integer
       additionalProperties: false
     WakeResult:
       type: object

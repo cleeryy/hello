@@ -38,6 +38,10 @@ type Scanner struct {
 	Subnet          *net.IPNet
 	ProbePorts      []int
 	ResolveHostname func(ip string) string
+	// Concurrency bounds parallel dials in a sweep (F-64).
+	Concurrency int
+	// Cooldown floors the delay between accepted scans (F-63).
+	Cooldown time.Duration
 
 	cooldown time.Duration
 	sweep    func(ctx context.Context, subnet *net.IPNet) map[string]struct{}
@@ -46,6 +50,9 @@ type Scanner struct {
 	mu       sync.Mutex
 	scanning bool
 	lastScan time.Time
+	// lastReport remembers the outcome of the latest finished scan (F-49).
+	lastCount int
+	lastErr   string
 }
 
 // New returns a Scanner probing common ports with a 30s cooldown.
@@ -53,11 +60,37 @@ func New() *Scanner {
 	s := &Scanner{
 		ProbePorts:      []int{22, 80, 443, 445, 8080},
 		ResolveHostname: reverseDNS,
+		Concurrency:     128,
+		Cooldown:        defaultCooldown,
 		cooldown:        defaultCooldown,
 	}
 	s.sweep = s.tcpSweep
 	s.readARP = runARP
 	return s
+}
+
+// SetCooldown overrides the scan cooldown, flooring at 5s (F-63).
+func (s *Scanner) SetCooldown(d time.Duration) {
+	if d < 5*time.Second {
+		d = 5 * time.Second
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Cooldown = d
+	s.cooldown = d
+}
+
+// effectiveCooldown reads the configured value, preferring the public field
+// so tests and main can tune it without a setter dance.
+func (s *Scanner) effectiveCooldown() time.Duration {
+	cooldown := s.Cooldown
+	if cooldown <= 0 {
+		cooldown = s.cooldown
+	}
+	if cooldown <= 0 {
+		cooldown = defaultCooldown
+	}
+	return cooldown
 }
 
 // Scan probes the subnet then maps live IPs to MACs via the ARP table. It
@@ -69,9 +102,10 @@ func (s *Scanner) Scan(ctx context.Context) ([]Host, error) {
 		s.mu.Unlock()
 		return nil, ErrScanBusy
 	}
-	if since := time.Since(s.lastScan); since < s.cooldown {
+	cooldown := s.effectiveCooldown()
+	if since := time.Since(s.lastScan); since < cooldown {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("%w: retry in %ds", ErrCoolingDown, int((s.cooldown-since).Seconds())+1)
+		return nil, fmt.Errorf("%w: retry in %ds", ErrCoolingDown, int((cooldown-since).Seconds())+1)
 	}
 	s.scanning = true
 	s.lastScan = time.Now()
@@ -88,9 +122,57 @@ func (s *Scanner) Scan(ctx context.Context) ([]Host, error) {
 		var err error
 		subnet, err = detectSubnet()
 		if err != nil {
+			s.noteResult(0, err.Error())
 			return nil, err
 		}
 	}
+	hosts, err := s.sweepSubnet(ctx, subnet)
+	if err != nil {
+		s.noteResult(0, err.Error())
+		return nil, err
+	}
+	s.noteResult(len(hosts), "")
+	return hosts, nil
+}
+
+// ScanSubnet runs one sweep over an explicit CIDR (F-45), keeping the same
+// busy and cooldown guards as Scan. Pinned subnets stay within maxHosts.
+func (s *Scanner) ScanSubnet(ctx context.Context, subnet *net.IPNet) ([]Host, error) {
+	if subnet == nil {
+		return nil, fmt.Errorf("discover: nil subnet")
+	}
+	s.mu.Lock()
+	if s.scanning {
+		s.mu.Unlock()
+		return nil, ErrScanBusy
+	}
+	cooldown := s.effectiveCooldown()
+	if since := time.Since(s.lastScan); since < cooldown {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w: retry in %ds", ErrCoolingDown, int((cooldown-since).Seconds())+1)
+	}
+	s.scanning = true
+	s.lastScan = time.Now()
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.scanning = false
+		s.mu.Unlock()
+	}()
+
+	hosts, err := s.sweepSubnet(ctx, subnet)
+	if err != nil {
+		s.noteResult(0, err.Error())
+		return nil, err
+	}
+	s.noteResult(len(hosts), "")
+	return hosts, nil
+}
+
+// sweepSubnet probes one subnet and merges ARP data, shared by Scan and
+// ScanSubnet after the guards pass.
+func (s *Scanner) sweepSubnet(ctx context.Context, subnet *net.IPNet) ([]Host, error) {
 	if hosts := countHosts(subnet); hosts > maxHosts {
 		return nil, fmt.Errorf("%w (%d hosts)", ErrSubnetLarge, hosts)
 	}
@@ -103,6 +185,11 @@ func (s *Scanner) Scan(ctx context.Context) ([]Host, error) {
 		merged[ip] = &Host{IP: ip, MAC: byMAC[ip]}
 	}
 	for ip, mac := range byMAC {
+		// ARP is host-wide: only merge entries inside the swept subnet so
+		// explicit-CIDR scans never report out-of-range hosts.
+		if parsed := net.ParseIP(ip); parsed == nil || !subnet.Contains(parsed) {
+			continue
+		}
 		if h, ok := merged[ip]; ok {
 			h.MAC = mac
 		} else {
@@ -124,13 +211,53 @@ func (s *Scanner) Scan(ctx context.Context) ([]Host, error) {
 
 	hosts := make([]Host, 0, len(merged))
 	for _, h := range merged {
-		if name := s.ResolveHostname(h.IP); name != "" {
-			h.Hostname = name
+		if s.ResolveHostname != nil {
+			if name := s.ResolveHostname(h.IP); name != "" {
+				h.Hostname = name
+			}
 		}
 		hosts = append(hosts, *h)
 	}
 	sort.Slice(hosts, func(i, j int) bool { return hosts[i].IP < hosts[j].IP })
 	return hosts, nil
+}
+
+// noteResult remembers the latest finished scan outcome.
+func (s *Scanner) noteResult(count int, errMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastCount = count
+	s.lastErr = errMsg
+}
+
+// Report is the latest finished scan outcome plus live guard state (F-49).
+type Report struct {
+	Scanning  bool   `json:"scanning"`
+	RetryInS  int64  `json:"retry_in_s"`
+	LastScan  int64  `json:"last_scan_at"`
+	LastHosts int    `json:"last_hosts"`
+	LastError string `json:"last_error,omitempty"`
+}
+
+// Status snapshots guards and the latest finished scan.
+func (s *Scanner) Status() Report {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cooldown := s.effectiveCooldown()
+	rep := Report{
+		Scanning:  s.scanning,
+		LastHosts: s.lastCount,
+		LastError: s.lastErr,
+	}
+	if !s.lastScan.IsZero() {
+		rep.LastScan = s.lastScan.Unix()
+	}
+	if !s.scanning {
+		if left := cooldown - time.Since(s.lastScan); left > 0 {
+			rep.RetryInS = int64(left.Seconds()) + 1
+		}
+	}
+	return rep
 }
 
 // RetryIn reports how long before another scan is accepted, zero when idle.
@@ -140,7 +267,7 @@ func (s *Scanner) RetryIn() time.Duration {
 	if s.scanning {
 		return 0
 	}
-	if left := s.cooldown - time.Since(s.lastScan); left > 0 {
+	if left := s.effectiveCooldown() - time.Since(s.lastScan); left > 0 {
 		return left
 	}
 	return 0
@@ -153,7 +280,11 @@ func (s *Scanner) tcpSweep(ctx context.Context, subnet *net.IPNet) map[string]st
 	open := make(map[string]struct{})
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 128)
+	width := s.Concurrency
+	if width <= 0 {
+		width = 128
+	}
+	sem := make(chan struct{}, width)
 	for _, ip := range subnetIPs(subnet) {
 		wg.Add(1)
 		go func(ip string) {

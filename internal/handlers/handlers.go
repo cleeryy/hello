@@ -13,6 +13,7 @@ import (
 	"github.com/cleeryy/hello/internal/discover"
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
+	"github.com/cleeryy/hello/internal/monitor"
 	"github.com/cleeryy/hello/internal/ping"
 	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/storage"
@@ -29,6 +30,8 @@ type Server struct {
 	schedStore *scheduler.Store
 	sched      *scheduler.Scheduler
 	disc       *discover.Scanner
+	ignore     *discover.IgnoreList
+	mon        *monitor.Monitor
 	sendWOL    func(mac, broadcast string) error
 	limiter    *requestLimiter
 	adoptLimit *rateLimiter
@@ -72,6 +75,20 @@ func (s *Server) WithSchedules(store *scheduler.Store, sched *scheduler.Schedule
 // unregistered and onboarding stays manual.
 func (s *Server) WithDiscover(d *discover.Scanner) *Server {
 	s.disc = d
+	return s
+}
+
+// WithIgnoreList wires the discovery denylist; without it scan results are
+// unfiltered and the ignore routes stay unregistered.
+func (s *Server) WithIgnoreList(il *discover.IgnoreList) *Server {
+	s.ignore = il
+	return s
+}
+
+// WithMonitor wires the reachability monitor; without it the monitor routes
+// stay unregistered.
+func (s *Server) WithMonitor(m *monitor.Monitor) *Server {
+	s.mon = m
 	return s
 }
 
@@ -137,7 +154,22 @@ func (s *Server) Mount(r *gin.Engine) {
 	}
 	if s.disc != nil {
 		guarded.POST("/discover/adopt", s.adoptHosts)
+		guarded.GET("/discover/status", s.discoverStatus)
+		throttled.POST("/discover/adopt-all", s.adoptAll)
 	}
+	if s.ignore != nil {
+		guarded.GET("/discover/ignore", s.listIgnore)
+		guarded.POST("/discover/ignore", s.addIgnore)
+		guarded.DELETE("/discover/ignore", s.deleteIgnore)
+	}
+	if s.mon != nil {
+		guarded.POST("/monitor/check", s.checkMonitor)
+		guarded.GET("/monitor/transitions", s.monitorTransitions)
+		guarded.GET("/monitor/uptime", s.monitorUptime)
+		guarded.GET("/monitor/flapping", s.monitorFlapping)
+		guarded.GET("/monitor/status", s.monitorStatus)
+	}
+	guarded.GET("/version", s.version)
 }
 
 func (s *Server) welcome(c *gin.Context) {
@@ -147,8 +179,49 @@ func (s *Server) welcome(c *gin.Context) {
 	})
 }
 
+// Version is the build version reported by /health and /version.
+// Release builds override it with -ldflags "-X .../handlers.Version=vX.Y.Z".
+var Version = "dev"
+
+func (s *Server) version(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"version": Version})
+}
+
+// health stays a 200 liveness probe and also reports load-bearing counts
+// so dashboards and uptime checks get one cheap call.
 func (s *Server) health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	var up, down, unknown int
+	for _, d := range s.store.GetAll() {
+		switch d.Status {
+		case models.StatusUp:
+			up++
+		case models.StatusDown:
+			down++
+		default:
+			unknown++
+		}
+	}
+	schedTotal, schedEnabled := 0, 0
+	if s.schedStore != nil {
+		for _, item := range s.schedStore.All() {
+			schedTotal++
+			if item.Enabled {
+				schedEnabled++
+			}
+		}
+	}
+	histSize := 0
+	if s.hist != nil {
+		histSize = s.hist.Stats().Size
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":         "ok",
+		"version":        Version,
+		"uptime_seconds": int64(time.Since(s.started).Seconds()),
+		"devices":        gin.H{"total": up + down + unknown, "up": up, "down": down, "unknown": unknown},
+		"schedules":      gin.H{"total": schedTotal, "enabled": schedEnabled},
+		"history_size":   histSize,
+	})
 }
 
 const problemContentType = "application/problem+json"
@@ -193,6 +266,10 @@ func writeErr(c *gin.Context, err error) {
 		errors.Is(err, models.ErrInvalidMAC),
 		errors.Is(err, models.ErrInvalidIP),
 		errors.Is(err, models.ErrInvalidStat),
+		errors.Is(err, models.ErrNotesLong),
+		errors.Is(err, models.ErrInvalidTag),
+		errors.Is(err, models.ErrTooManyTags),
+		errors.Is(err, models.ErrInvalidMon),
 		errors.Is(err, wol.ErrInvalidMAC):
 		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity", err.Error(), nil)
 	default:

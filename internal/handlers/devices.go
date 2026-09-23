@@ -233,6 +233,8 @@ func (s *Server) patchDevice(c *gin.Context) {
 			updated.Status = models.Status(raw)
 		case "ping_enabled":
 			updated.PingEnabled, ferr = patchBool(value)
+		case "monitor_secs":
+			updated.MonitorSecs, ferr = patchInt(value)
 		case "tags":
 			updated.Tags, ferr = patchTags(value)
 		case "id":
@@ -276,6 +278,15 @@ func patchBool(value any) (bool, error) {
 		return false, fmt.Errorf("must be a boolean")
 	}
 	return raw, nil
+}
+
+// patchInt reads a non-negative JSON number (decoded as float64).
+func patchInt(value any) (int, error) {
+	raw, ok := value.(float64)
+	if !ok || raw != float64(int(raw)) || raw < 0 {
+		return 0, fmt.Errorf("must be a non-negative integer")
+	}
+	return int(raw), nil
 }
 
 func patchTags(value any) ([]string, error) {

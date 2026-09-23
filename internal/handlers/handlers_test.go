@@ -76,7 +76,7 @@ func TestIndexAndHealth(t *testing.T) {
 
 	w = doRequest(s, http.MethodGet, "/health", nil)
 	require.Equal(t, http.StatusOK, w.Code)
-	var health map[string]string
+	var health map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &health))
 	require.Equal(t, "ok", health["status"])
 }
