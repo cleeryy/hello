@@ -35,6 +35,8 @@ type Server struct {
 	// pingHost checks reachability for retry-until-up; stubbed in tests.
 	pingHost func(ip string, timeout time.Duration) bool
 	started  time.Time
+	// oneshots holds pending delayed wakes (in-memory, ephemeral).
+	oneshots *oneshotRegistry
 }
 
 // New returns a Server sending magic packets via wol.SendWOLPacket.
@@ -48,6 +50,7 @@ func New(cfg *config.Config, store *storage.Storage, hub *wshub.Hub) *Server {
 		adoptLimit: newRateLimiter(5, time.Minute),
 		pingHost:   ping.PingHost,
 		started:    time.Now(),
+		oneshots:   newOneshotRegistry(),
 	}
 }
 
@@ -100,6 +103,7 @@ func (s *Server) Mount(r *gin.Engine) {
 	throttled.GET("/wake/:macAddress", s.wakeMAC)
 	throttled.POST("/discover", s.scanNetwork)
 	throttled.POST("/devices/wake-batch", s.wakeBatch)
+	throttled.POST("/wake/oneshots", s.createOneshot)
 
 	guarded.GET("/devices", s.listDevices)
 	guarded.POST("/devices", s.createDevice)
@@ -114,12 +118,22 @@ func (s *Server) Mount(r *gin.Engine) {
 	guarded.POST("/devices/:id/wake", s.wakeDevice)
 	guarded.POST("/devices/:id/clone", s.cloneDevice)
 	guarded.GET("/history", s.listHistory)
+	guarded.GET("/history/stats", s.historyStats)
+	guarded.GET("/history/export", s.exportHistory)
+	guarded.DELETE("/history", s.purgeHistory)
 	guarded.GET("/metrics", s.metrics)
+	guarded.GET("/wake/oneshots", s.listOneshots)
+	guarded.DELETE("/wake/oneshots/:id", s.cancelOneshot)
 	if s.schedStore != nil {
 		guarded.GET("/schedules", s.listSchedules)
 		guarded.POST("/schedules", s.createSchedule)
+		guarded.POST("/schedules/validate", s.validateSchedule)
+		guarded.POST("/schedules/pause-all", s.pauseSchedules)
+		guarded.POST("/schedules/resume-all", s.resumeSchedules)
 		guarded.PUT("/schedules/:id", s.updateSchedule)
 		guarded.DELETE("/schedules/:id", s.deleteSchedule)
+		guarded.POST("/schedules/:id/duplicate", s.duplicateSchedule)
+		guarded.POST("/schedules/:id/fire", s.fireScheduleNow)
 	}
 	if s.disc != nil {
 		guarded.POST("/discover/adopt", s.adoptHosts)

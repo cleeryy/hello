@@ -27,6 +27,9 @@ func (t Trigger) IsValid() bool {
 // ErrInvalidTrigger is returned for trigger values outside the known set.
 var ErrInvalidTrigger = errors.New("models: invalid trigger")
 
+// maxNoteRunes bounds the free-text note attached to a wake.
+const maxNoteRunes = 140
+
 // WakeEvent is one sent magic packet, success or failure.
 // JSON field names are part of the on-disk/API contract.
 type WakeEvent struct {
@@ -37,8 +40,10 @@ type WakeEvent struct {
 	Trigger  Trigger `json:"trigger"`
 	Success  bool    `json:"success"`
 	// Attempts counts sent packets for this entry (retry-until-up).
-	Attempts int    `json:"attempts,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Attempts int `json:"attempts,omitempty"`
+	// Note is an optional human annotation recorded with the wake.
+	Note  string `json:"note,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // Validate checks the invariants of a wake event.
@@ -51,6 +56,9 @@ func (e *WakeEvent) Validate() error {
 	}
 	if !e.Trigger.IsValid() {
 		return fmt.Errorf("trigger %q: %w", e.Trigger, ErrInvalidTrigger)
+	}
+	if len([]rune(e.Note)) > maxNoteRunes {
+		return fmt.Errorf("note must be at most %d characters", maxNoteRunes)
 	}
 	return nil
 }

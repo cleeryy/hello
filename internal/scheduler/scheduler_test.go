@@ -29,10 +29,11 @@ func TestScheduler_whenTickFires(t *testing.T) {
 		func(id string) (models.Device, error) {
 			return models.Device{ID: id, Name: "pc", MAC: "00:11:22:33:44:55"}, nil
 		},
-		func(sched models.Schedule, _ models.Device) {
+		func(sched models.Schedule, _ models.Device) (bool, string) {
 			mu.Lock()
 			fired = append(fired, sched)
 			mu.Unlock()
+			return true, ""
 		})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -56,7 +57,7 @@ func TestScheduler_whenReloadReflectsStore(t *testing.T) {
 		func(id string) (models.Device, error) {
 			return models.Device{ID: id}, nil
 		},
-		func(models.Schedule, models.Device) {})
+		func(models.Schedule, models.Device) (bool, string) { return true, "" })
 	// When: schedules are added then removed with Reload between
 	// Then: active entry count tracks the store
 	require.Equal(t, 0, sch.Entries())
@@ -87,7 +88,7 @@ func TestScheduler_whenDeviceGone(t *testing.T) {
 		func(id string) (models.Device, error) {
 			return models.Device{}, scheduler.ErrNotFound
 		},
-		func(models.Schedule, models.Device) { calls <- struct{}{} })
+		func(models.Schedule, models.Device) (bool, string) { calls <- struct{}{}; return true, "" })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sch.Start(ctx)

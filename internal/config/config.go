@@ -26,9 +26,15 @@ type Config struct {
 	// HistoryFile persists the wake log.
 	HistoryFile string
 	// SchedulesFile persists wake schedules.
-	SchedulesFile  string
-	TrustedProxies string
-	CORSOrigins    string
+	SchedulesFile string
+	// HistoryCap bounds the retained wake log (F-29).
+	HistoryCap int
+	// SchedulesCap bounds the number of stored schedules (F-37).
+	SchedulesCap int
+	// WakeCooldownSec throttles manual wakes per device, 0 disables (F-21).
+	WakeCooldownSec int
+	TrustedProxies  string
+	CORSOrigins     string
 }
 
 const (
@@ -40,6 +46,11 @@ const (
 	defaultMonitorInterval = 30 * time.Second
 	defaultTrustedProxies  = "127.0.0.1,::1"
 	minTokenLength         = 16
+	defaultHistoryCap      = 200
+	maxHistoryCap          = 2000
+	defaultSchedulesCap    = 100
+	maxSchedulesCap        = 1000
+	maxWakeCooldownSec     = 3600
 )
 
 var apiTokenPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -59,6 +70,9 @@ func LoadConfig() (*Config, error) {
 		APIToken:        os.Getenv("API_TOKEN"),
 		HistoryFile:     envOr("HISTORY_FILE", defaultHistoryFile),
 		SchedulesFile:   envOr("SCHEDULES_FILE", defaultSchedulesFile),
+		HistoryCap:      boundedInt("HISTORY_CAP", defaultHistoryCap, 10, maxHistoryCap),
+		SchedulesCap:    boundedInt("SCHEDULES_CAP", defaultSchedulesCap, 1, maxSchedulesCap),
+		WakeCooldownSec: boundedInt("WAKE_COOLDOWN_SEC", 0, 0, maxWakeCooldownSec),
 		TrustedProxies:  envOr("TRUSTED_PROXIES", defaultTrustedProxies),
 		CORSOrigins:     os.Getenv("CORS_ORIGINS"),
 	}
@@ -92,6 +106,20 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// boundedInt reads an integer env var, falling back to fallback when
+// missing, unparsable, or outside [min, max].
+func boundedInt(key string, fallback, min, max int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < min || n > max {
+		return fallback
+	}
+	return n
 }
 
 func monitorInterval() time.Duration {

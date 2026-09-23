@@ -58,11 +58,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	hist, err := history.New(cfg.HistoryFile)
+	hist, err := history.NewWithCapacity(cfg.HistoryFile, cfg.HistoryCap)
 	if err != nil {
 		return err
 	}
-	schedStore, err := scheduler.NewStore(cfg.SchedulesFile)
+	schedStore, err := scheduler.NewStoreWithCap(cfg.SchedulesFile, cfg.SchedulesCap)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func run() error {
 			}
 			return *dev, nil
 		},
-		func(sched models.Schedule, dev models.Device) {
+		func(sched models.Schedule, dev models.Device) (bool, string) {
 			errMsg := ""
 			success := true
 			if err := wol.SendWOLPacket(dev.MAC, wol.BroadcastForIP(dev.IP, cfg.BroadcastIP)); err != nil {
@@ -109,6 +109,7 @@ func run() error {
 					slog.Warn("wake counter update failed", slog.String("device", dev.ID), slog.Any("err", err))
 				}
 			}
+			return success, errMsg
 		})
 	go sch.Start(ctx)
 
