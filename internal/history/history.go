@@ -22,6 +22,10 @@ type History struct {
 	file     string
 	capacity int
 	seq      uint64
+	// wakeCounts tallies recorded packets by trigger and result for /metrics.
+	// First index: 0 = manual, 1 = schedule. Second index: 0 = ok, 1 = error.
+	wakeCounts [2][2]uint64
+	startedAt  time.Time
 }
 
 // New opens the history at filepath. Missing files start empty; unreadable or
@@ -31,7 +35,7 @@ func New(filepath string) (*History, error) {
 }
 
 func newWithCapacity(filepath string, capacity int) (*History, error) {
-	h := &History{file: filepath, capacity: capacity}
+	h := &History{file: filepath, capacity: capacity, startedAt: time.Now()}
 	data, err := os.ReadFile(filepath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -84,7 +88,43 @@ func (h *History) Record(e models.WakeEvent) (models.WakeEvent, error) {
 		h.seq = previousSeq
 		return models.WakeEvent{}, err
 	}
+	h.wakeCounts[triggerIndex(e.Trigger)][resultIndex(e.Success)]++
 	return e, nil
+}
+
+func triggerIndex(t models.Trigger) int {
+	if t == models.TriggerSchedule {
+		return 1
+	}
+	return 0
+}
+
+func resultIndex(ok bool) int {
+	if ok {
+		return 0
+	}
+	return 1
+}
+
+// Stats snapshots wake counters, retention size, and start time.
+type Stats struct {
+	ManualOK, ManualErr, ScheduleOK, ScheduleErr uint64
+	StartedAt                                    time.Time
+	Size                                         int
+}
+
+// Stats returns a consistent snapshot of the counters and retention size.
+func (h *History) Stats() Stats {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return Stats{
+		ManualOK:    h.wakeCounts[0][0],
+		ManualErr:   h.wakeCounts[0][1],
+		ScheduleOK:  h.wakeCounts[1][0],
+		ScheduleErr: h.wakeCounts[1][1],
+		StartedAt:   h.startedAt,
+		Size:        len(h.entries),
+	}
 }
 
 // List returns stored entries newest-first, optionally filtered by device.
