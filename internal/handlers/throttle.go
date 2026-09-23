@@ -51,17 +51,24 @@ func throttle(limiter *requestLimiter) gin.HandlerFunc {
 			authed.ClientIP = c.ClientIP()
 		}
 		allowed, remaining := limiter.allow(authed)
+		now := time.Now()
+		// The cooldown bucket holds a single request: every response states
+		// the limit honestly, allowed or not.
+		c.Header("X-RateLimit-Limit", "1")
+		c.Header("X-RateLimit-Remaining", "0")
 		if !allowed {
 			retryAfter := int((remaining + time.Second - 1) / time.Second)
 			if retryAfter < 1 {
 				retryAfter = 1
 			}
 			c.Header("Retry-After", fmt.Sprint(retryAfter))
+			c.Header("X-RateLimit-Reset", fmt.Sprint(now.Add(remaining).Unix()))
 			writeProblem(c, http.StatusTooManyRequests, "too many requests",
 				"request cooldown is active", nil)
 			c.Abort()
 			return
 		}
+		c.Header("X-RateLimit-Reset", fmt.Sprint(now.Add(limiter.cooldown).Unix()))
 		c.Next()
 	}
 }
