@@ -135,6 +135,44 @@ func (h *History) Stats() Stats {
 	}
 }
 
+// ValidateEvents checks restore candidates without persisting anything,
+// so restore dry-runs enforce the exact same rules.
+func ValidateEvents(entries []models.WakeEvent) error {
+	for i := range entries {
+		if err := entries[i].Validate(); err != nil {
+			return fmt.Errorf("history: restore index %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// Restore replaces the log with previously exported entries, keeping their
+// ids and timestamps. Session counters are statistics, not log state, and
+// are left untouched. On persistence failure memory is rolled back.
+func (h *History) Restore(entries []models.WakeEvent) error {
+	if err := ValidateEvents(entries); err != nil {
+		return err
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	previous := append([]models.WakeEvent(nil), h.entries...)
+	previousSeq := h.seq
+	fresh := append([]models.WakeEvent(nil), entries...)
+	if len(fresh) > h.capacity {
+		fresh = fresh[:h.capacity]
+	}
+	h.entries = fresh
+	h.seq = uint64(len(fresh))
+	if err := h.save(); err != nil {
+		h.entries = previous
+		h.seq = previousSeq
+		return err
+	}
+	return nil
+}
+
 // List returns stored entries newest-first, optionally filtered by device.
 // A non-positive limit selects the default page of 50.
 func (h *History) List(deviceID string, limit int) []models.WakeEvent {

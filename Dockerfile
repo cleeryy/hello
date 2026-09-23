@@ -6,7 +6,8 @@ RUN go mod download
 
 # Now copy the rest of the source code
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /wol-api ./cmd/api
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X github.com/cleeryy/hello/internal/handlers.Version=${VERSION}" -o /wol-api ./cmd/api
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates

@@ -118,4 +118,29 @@ if [ "$code" != "422" ]; then
 fi
 echo "rejected (422)"
 
+echo "17. Version carries the request id"
+curl -sf "${AUTH[@]}" -D - "$API/version" -o /tmp/hello-version.json | grep -i "X-Request-ID"
+cat /tmp/hello-version.json | jq .
+
+echo "18. Backup, validate restore dry-run, then restore"
+curl -sf "${AUTH[@]}" "$API/backup" -o /tmp/hello-backup.json
+jq -e '.version == 1 and (.devices | type == "array")' /tmp/hello-backup.json > /dev/null
+curl -sf "${AUTH[@]}" -X POST "$API/restore?dry_run=1" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/hello-backup.json | jq .
+curl -sf "${AUTH[@]}" -X POST "$API/restore" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/hello-backup.json | jq .
+
+echo "19. Redacted runtime config (no token)"
+curl -sf "${AUTH[@]}" "$API/config" | jq .
+if curl -s "${AUTH[@]}" "$API/config" | grep -qi "token.*[A-Za-z0-9_-]\{16\}"; then
+  echo "token leaked in /config"
+  exit 1
+fi
+echo "no token in /config"
+
+echo "20. Doctor passes on this environment"
+API_TOKEN="$API_TOKEN" DEFAULT_MAC="$DEFAULT_MAC" go run ./cmd/api doctor
+
 echo "Tests done"

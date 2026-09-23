@@ -1383,6 +1383,72 @@ paths:
                 $ref: '#/components/schemas/Version'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /backup:
+    get:
+      tags: [System]
+      summary: Download a full backup envelope
+      operationId: backup
+      responses:
+        '200':
+          description: Versioned backup, served as an attachment
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /restore:
+    post:
+      tags: [System]
+      summary: Validate and apply a backup envelope
+      operationId: restore
+      parameters:
+        - name: dry_run
+          in: query
+          description: Validate only, 1/true/yes
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreInput'
+      responses:
+        '200':
+          description: Restore counts, or validation counts in dry_run mode
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/RestoreResult'
+                  - $ref: '#/components/schemas/RestoreDryRun'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /config:
+    get:
+      tags: [System]
+      summary: Redacted runtime configuration
+      operationId: runtimeConfig
+      responses:
+        '200':
+          description: Settings with the token never included
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 components:
   parameters:
     MacAddress:
@@ -1946,6 +2012,108 @@ components:
         last_changed:
           type: integer
       additionalProperties: false
+    BackupEnvelope:
+      type: object
+      required: [version, exported_at, devices, history, schedules]
+      properties:
+        version:
+          type: integer
+          example: 1
+        exported_at:
+          type: integer
+          format: int64
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/WakeEvent'
+        schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Schedule'
+    RestoreInput:
+      type: object
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/WakeEvent'
+        schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Schedule'
+    RestoreDryRun:
+      type: object
+      required: [dry_run, valid, counts]
+      properties:
+        dry_run:
+          type: boolean
+          example: true
+        valid:
+          type: boolean
+          example: true
+        counts:
+          type: object
+          properties:
+            devices:
+              type: integer
+            schedules:
+              type: integer
+            history:
+              type: integer
+    RestoreResult:
+      type: object
+      required: [restored]
+      properties:
+        restored:
+          type: object
+          description: Per-store applied counts for the stores present in the payload
+          properties:
+            devices:
+              type: integer
+            schedules:
+              type: integer
+            history:
+              type: integer
+    RuntimeConfig:
+      type: object
+      required: [port, broadcast_ip, monitor_interval_sec, history_cap, schedules_cap, wake_cooldown_sec, trusted_proxies, cors_origins, token_from_file, webhooks, version]
+      properties:
+        port:
+          type: string
+        broadcast_ip:
+          type: string
+        monitor_interval_sec:
+          type: integer
+        history_cap:
+          type: integer
+        schedules_cap:
+          type: integer
+        wake_cooldown_sec:
+          type: integer
+        trusted_proxies:
+          type: string
+        cors_origins:
+          type: string
+        token_from_file:
+          type: boolean
+        webhooks:
+          type: object
+          required: [status, wake]
+          properties:
+            status:
+              type: boolean
+            wake:
+              type: boolean
+        version:
+          type: string
     Version:
       type: object
       required: [version]

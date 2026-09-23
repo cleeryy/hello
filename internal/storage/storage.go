@@ -140,6 +140,52 @@ func (s *Storage) Save() error {
 	return s.save()
 }
 
+// ValidateDevices normalizes and checks a full replacement batch without
+// persisting anything, so restore dry-runs enforce the exact same rules.
+func ValidateDevices(devices []*models.Device) ([]*models.Device, error) {
+	prepared := make([]*models.Device, 0, len(devices))
+	seen := make(map[string]struct{}, len(devices))
+	for _, device := range devices {
+		if device == nil {
+			return nil, fmt.Errorf("storage: replace: nil device")
+		}
+		device.Normalize()
+		if err := device.Validate(); err != nil {
+			return nil, fmt.Errorf("storage: replace %q: %w", device.ID, err)
+		}
+		if _, dup := seen[device.ID]; dup {
+			return nil, fmt.Errorf("storage: replace: duplicate device id %q", device.ID)
+		}
+		seen[device.ID] = struct{}{}
+		prepared = append(prepared, clone(device))
+	}
+	return prepared, nil
+}
+
+// ReplaceAll validates a full registry replacement, then performs one locked
+// write. On any persistence failure the in-memory registry is restored to
+// its prior state, so callers can treat restore as all-or-nothing.
+func (s *Storage) ReplaceAll(devices []*models.Device) ([]*models.Device, error) {
+	prepared, err := ValidateDevices(devices)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous := cloneDevices(s.devices)
+	fresh := make(map[string]*models.Device, len(prepared))
+	for _, device := range prepared {
+		fresh[device.ID] = clone(device)
+	}
+	s.devices = fresh
+	if err := s.save(); err != nil {
+		s.devices = previous
+		return nil, err
+	}
+	return prepared, nil
+}
+
 // Create validates and atomically inserts one device.
 func (s *Storage) Create(device *models.Device) error {
 	_, err := s.CreateMany([]*models.Device{device})

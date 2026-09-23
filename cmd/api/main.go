@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
 	"github.com/cleeryy/hello/internal/monitor"
+	"github.com/cleeryy/hello/internal/notify"
 	"github.com/cleeryy/hello/internal/ping"
 	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/storage"
@@ -25,18 +27,30 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "seed" {
-		src := "devices.example.json"
-		if len(os.Args) > 2 {
-			src = os.Args[2]
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "doctor":
+			if err := runDoctor(os.Args[2:]); err != nil {
+				slog.Error("doctor failed", slog.Any("err", err))
+				os.Exit(1)
+			}
+			return
+		case "version", "--version", "-v":
+			fmt.Println(handlers.Version)
+			return
+		case "seed":
+			src := "devices.example.json"
+			if len(os.Args) > 2 {
+				src = os.Args[2]
+			}
+			count, err := seedDevices(seedFile(), src)
+			if err != nil {
+				slog.Error("seed failed", slog.Any("err", err))
+				os.Exit(1)
+			}
+			slog.Info("seeded devices", slog.Int("count", count))
+			return
 		}
-		count, err := seedDevices(seedFile(), src)
-		if err != nil {
-			slog.Error("seed failed", slog.Any("err", err))
-			os.Exit(1)
-		}
-		slog.Info("seeded devices", slog.Int("count", count))
-		return
 	}
 	if err := run(); err != nil {
 		slog.Error("fatal", slog.Any("err", err))
@@ -66,6 +80,26 @@ func autoScan(ctx context.Context, disc *discover.Scanner, interval time.Duratio
 	}
 }
 
+// watchReloadSignal re-reads the registry file on SIGHUP so operators can
+// push device edits without a restart. A failed reload keeps the old state.
+func watchReloadSignal(ctx context.Context, store *storage.Storage) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGHUP)
+	defer signal.Stop(ch)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ch:
+			if err := store.Load(); err != nil {
+				slog.Warn("SIGHUP reload failed, keeping current registry", slog.Any("err", err))
+				continue
+			}
+			slog.Info("registry reloaded on SIGHUP")
+		}
+	}
+}
+
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -81,6 +115,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	go watchReloadSignal(ctx, store)
 	hist, err := history.NewWithCapacity(cfg.HistoryFile, cfg.HistoryCap)
 	if err != nil {
 		return err
@@ -116,6 +151,9 @@ func run() error {
 	hub := wshub.NewHub(origins...)
 	go hub.Run(ctx)
 
+	statusSender := notify.New(cfg.StatusWebhookURL)
+	wakeSender := notify.New(cfg.WakeWebhookURL)
+
 	sch := scheduler.New(schedStore,
 		func(id string) (models.Device, error) {
 			dev, err := store.Get(id)
@@ -147,12 +185,26 @@ func run() error {
 					slog.Warn("wake counter update failed", slog.String("device", dev.ID), slog.Any("err", err))
 				}
 			}
+			wakeSender.Send(notify.WakePayload{
+				DeviceID: dev.ID,
+				MAC:      dev.MAC,
+				Success:  success,
+				Attempts: 1,
+				Trigger:  string(models.TriggerSchedule),
+			})
 			return success, errMsg
 		})
 	go sch.Start(ctx)
 
 	mon := monitor.NewWithTimeout(store, cfg.MonitorInterval, time.Duration(cfg.PingTimeoutSec)*time.Second)
-	mon.OnStatusChange = hub.Broadcast
+	mon.OnStatusChange = func(dev models.Device) {
+		hub.Broadcast(dev)
+		statusSender.Send(notify.StatusPayload{
+			DeviceID: dev.ID,
+			Status:   string(dev.Status),
+			At:       time.Now().Unix(),
+		})
+	}
 	mon.Start(ctx)
 	defer mon.Stop()
 
@@ -190,6 +242,7 @@ func run() error {
 		WithDiscover(disc).
 		WithIgnoreList(ignore).
 		WithMonitor(mon).
+		WithNotify(statusSender, wakeSender).
 		Mount(r)
 	handlers.RegisterDashboard(r)
 
