@@ -597,6 +597,39 @@ paths:
             maximum: 5
             default: 2
             description: Seconds between retry attempts
+        - name: dry_run
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Validate only (values 1, true, yes); sends nothing, logs nothing
+        - name: broadcast
+          in: query
+          required: false
+          schema:
+            type: string
+            format: ipv4
+          description: Override the computed directed broadcast for this wake
+        - name: note
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 140
+          description: 'Free note stored on the history entry; a JSON body {"note": "..."} works too'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 140
+                  description: Free note stored on the history entry
+              additionalProperties: false
       responses:
         '200':
           description: Magic packet sent
@@ -616,11 +649,78 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '500':
           $ref: '#/components/responses/InternalError'
+  /wake/oneshots:
+    get:
+      tags: [Devices]
+      summary: List pending one-shot wakes
+      description: Ephemeral delayed wakes, soonest first. Lost on restart.
+      operationId: listOneshots
+      responses:
+        '200':
+          description: Pending one-shots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneshotList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Devices]
+      summary: Schedule a one-shot wake
+      description: Exactly one of device_id or mac, at most 24h ahead. Shares the wake throttle. Fires once as a manual wake with the optional note.
+      operationId: createOneshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneshotInput'
+      responses:
+        '201':
+          description: One-shot armed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Oneshot'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Unknown device, bad time or note, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /wake/oneshots/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [Devices]
+      summary: Cancel a pending one-shot
+      operationId: deleteOneshot
+      responses:
+        '204':
+          description: Cancelled, no body
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /history:
     get:
       tags: [Devices]
       summary: List recorded wakes
-      description: Newest first. Filter by registry id, cap the page with limit.
+      description: Newest first. Filter by registry id, trigger, success, and time window; cap the page with limit.
       operationId: listHistory
       parameters:
         - name: device_id
@@ -628,6 +728,31 @@ paths:
           required: false
           schema:
             type: string
+        - name: trigger
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [manual, schedule]
+        - name: success
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Keep entries at or after this RFC 3339 time
+        - name: before
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Keep entries strictly before this RFC 3339 time
         - name: limit
           in: query
           required: false
@@ -648,6 +773,75 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Bad trigger, success, since or before value, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [Devices]
+      summary: Purge old history entries
+      description: Deletes every entry older than the required RFC 3339 before time. There is no undo.
+      operationId: purgeHistory
+      parameters:
+        - name: before
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Purge count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurgeResult'
+        '400':
+          description: Missing before, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Bad before value, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /history/stats:
+    get:
+      tags: [Devices]
+      summary: Wake statistics over retained history
+      description: Totals, success rate, and per-trigger splits computed on the entries currently retained (bounded by HISTORY_CAP).
+      operationId: historyStats
+      responses:
+        '200':
+          description: Statistics snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /history/export:
+    get:
+      tags: [Devices]
+      summary: Export history as CSV
+      description: Downloads the retained entries as a history.csv attachment (id, at, device_id, mac, trigger, success, attempts, note, error).
+      operationId: exportHistory
+      responses:
+        '200':
+          description: CSV attachment
+          content:
+            text/csv:
+              schema:
+                type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
   /metrics:
@@ -768,6 +962,127 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+  /schedules/pause-all:
+    post:
+      tags: [Schedules]
+      summary: Pause every schedule
+      description: Disables all schedules at once and reloads the runner. Idempotent.
+      operationId: pauseSchedules
+      responses:
+        '200':
+          description: Pause report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PauseResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /schedules/resume-all:
+    post:
+      tags: [Schedules]
+      summary: Resume every schedule
+      description: Re-enables all schedules at once and reloads the runner. Idempotent.
+      operationId: resumeSchedules
+      responses:
+        '200':
+          description: Resume report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PauseResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /schedules/validate:
+    post:
+      tags: [Schedules]
+      summary: Validate a cron expression
+      description: Checks a cron expression and previews its next run without persisting anything.
+      operationId: validateSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CronInput'
+      responses:
+        '200':
+          description: Validation verdict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateResult'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /schedules/{id}/duplicate:
+    post:
+      tags: [Schedules]
+      summary: Duplicate a schedule
+      description: Copies a schedule under a fresh id, dropping one-shot state.
+      operationId: duplicateSchedule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Schedule duplicated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Registry full, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /schedules/{id}/fire:
+    post:
+      tags: [Schedules]
+      summary: Fire a schedule now
+      description: Wakes the schedule target immediately with the schedule trigger.
+      operationId: fireScheduleNow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Immediate wake result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleFireResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unknown target device, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: Magic packet send failed, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /discover:
     post:
       tags: [Discovery]
@@ -978,6 +1293,10 @@ components:
         attempts:
           type: integer
           description: Packets sent for this entry (retry-until-up); absent when 1
+        note:
+          type: string
+          description: Free note attached at wake time, at most 140 characters
+          maxLength: 140
         error:
           type: string
       additionalProperties: false
@@ -1007,6 +1326,25 @@ components:
           example: 0 7 * * 1-5
         enabled:
           type: boolean
+        once:
+          type: boolean
+          description: One-shot schedule, auto-disabled after its first fire
+        once_at:
+          type: integer
+          format: int64
+          description: Unix seconds of the one-shot fire time
+        next_run:
+          type: integer
+          format: int64
+          description: Computed unix seconds of the next fire, serve-time only
+        last_run_at:
+          type: integer
+          format: int64
+          description: Unix seconds of the last fire, absent when never fired
+        last_result:
+          type: string
+          enum: [ok, error]
+          description: Outcome of the last fire, absent when never fired
       additionalProperties: false
     ScheduleInput:
       type: object
@@ -1024,6 +1362,11 @@ components:
           minLength: 1
         enabled:
           type: boolean
+        once_at:
+          type: string
+          format: date-time
+          description: RFC 3339 fire time turning creation into a one-shot schedule
+          example: 2026-09-24T07:00:00Z
       additionalProperties: false
     ScheduleList:
       type: object
@@ -1033,6 +1376,137 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Schedule'
+      additionalProperties: false
+    Oneshot:
+      type: object
+      description: One delayed wake, in-memory only and lost on restart
+      required: [id, device_id, mac, at]
+      properties:
+        id:
+          type: string
+          example: o-1
+        device_id:
+          type: string
+          example: pc-salon
+        mac:
+          type: string
+          pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+          example: 00:11:22:33:44:55
+        at:
+          type: integer
+          format: int64
+          description: Unix seconds of the planned fire
+        note:
+          type: string
+          maxLength: 140
+      additionalProperties: false
+    OneshotInput:
+      type: object
+      description: Exactly one of device_id or mac, plus an RFC 3339 time 5s to 24h ahead
+      required: [at]
+      properties:
+        device_id:
+          type: string
+          minLength: 1
+        mac:
+          type: string
+          pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+        at:
+          type: string
+          format: date-time
+          example: 2026-09-24T07:00:00Z
+        note:
+          type: string
+          maxLength: 140
+      additionalProperties: false
+    OneshotList:
+      type: object
+      required: [oneshots]
+      properties:
+        oneshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Oneshot'
+      additionalProperties: false
+    HistoryStats:
+      type: object
+      required: [total, ok, error, success_rate, by_trigger]
+      properties:
+        total:
+          type: integer
+        ok:
+          type: integer
+        error:
+          type: integer
+        success_rate:
+          type: number
+          description: ok over total, 0 when empty, rounded to 4 decimals
+        by_trigger:
+          type: object
+          properties:
+            manual:
+              type: object
+              properties:
+                ok:
+                  type: integer
+                error:
+                  type: integer
+            schedule:
+              type: object
+              properties:
+                ok:
+                  type: integer
+                error:
+                  type: integer
+      additionalProperties: false
+    PurgeResult:
+      type: object
+      required: [purged]
+      properties:
+        purged:
+          type: integer
+          description: Entries older than before that were removed
+      additionalProperties: false
+    PauseResult:
+      type: object
+      required: [changed]
+      properties:
+        changed:
+          type: integer
+          description: Schedules actually flipped by the bulk switch
+      additionalProperties: false
+    CronInput:
+      type: object
+      required: [cron]
+      properties:
+        cron:
+          type: string
+          minLength: 1
+          example: 0 7 * * 1-5
+      additionalProperties: false
+    ValidateResult:
+      type: object
+      required: [valid]
+      properties:
+        valid:
+          type: boolean
+        next_run:
+          type: integer
+          format: int64
+          description: Next fire when valid, absent otherwise
+      additionalProperties: false
+    ScheduleFireResult:
+      type: object
+      required: [message, schedule_id, device_id, success]
+      properties:
+        message:
+          type: string
+        schedule_id:
+          type: string
+        device_id:
+          type: string
+        success:
+          type: boolean
       additionalProperties: false
     Host:
       type: object
@@ -1192,6 +1666,17 @@ components:
             $ref: '#/components/schemas/Problem'
     Unauthorized:
       description: Missing or invalid bearer token, RFC 9457 body
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Throttled wake, adopt or scan; Retry-After seconds in the header, RFC 9457 body
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
       content:
         application/problem+json:
           schema:

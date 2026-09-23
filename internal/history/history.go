@@ -34,6 +34,14 @@ func New(filepath string) (*History, error) {
 	return newWithCapacity(filepath, defaultCapacity)
 }
 
+// NewWithCapacity opens the history with a custom retention bound.
+func NewWithCapacity(filepath string, capacity int) (*History, error) {
+	if capacity <= 0 {
+		capacity = defaultCapacity
+	}
+	return newWithCapacity(filepath, capacity)
+}
+
 func newWithCapacity(filepath string, capacity int) (*History, error) {
 	h := &History{file: filepath, capacity: capacity, startedAt: time.Now()}
 	data, err := os.ReadFile(filepath)
@@ -130,6 +138,22 @@ func (h *History) Stats() Stats {
 // List returns stored entries newest-first, optionally filtered by device.
 // A non-positive limit selects the default page of 50.
 func (h *History) List(deviceID string, limit int) []models.WakeEvent {
+	return h.ListFiltered(Filter{DeviceID: deviceID}, limit)
+}
+
+// Filter selects history entries across device, trigger, result, and time.
+// Zero values disable their dimension; Since/Before are unix seconds.
+type Filter struct {
+	DeviceID string
+	Trigger  models.Trigger
+	Success  *bool
+	Since    int64
+	Before   int64
+}
+
+// ListFiltered returns stored entries newest-first matching f.
+// A non-positive limit selects the default page of 50.
+func (h *History) ListFiltered(f Filter, limit int) []models.WakeEvent {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -138,7 +162,19 @@ func (h *History) List(deviceID string, limit int) []models.WakeEvent {
 
 	out := make([]models.WakeEvent, 0, min(limit, len(h.entries)))
 	for _, e := range h.entries {
-		if deviceID != "" && e.DeviceID != deviceID {
+		if f.DeviceID != "" && e.DeviceID != f.DeviceID {
+			continue
+		}
+		if f.Trigger != "" && e.Trigger != f.Trigger {
+			continue
+		}
+		if f.Success != nil && e.Success != *f.Success {
+			continue
+		}
+		if f.Since != 0 && e.At < f.Since {
+			continue
+		}
+		if f.Before != 0 && e.At >= f.Before {
 			continue
 		}
 		out = append(out, e)
@@ -147,6 +183,33 @@ func (h *History) List(deviceID string, limit int) []models.WakeEvent {
 		}
 	}
 	return out
+}
+
+// Purge drops entries recorded strictly before the unix timestamp,
+// persists, and returns the removed count.
+func (h *History) Purge(before int64) (int, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	kept := h.entries[:0:0]
+	purged := 0
+	for _, e := range h.entries {
+		if e.At < before {
+			purged++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if purged == 0 {
+		return 0, nil
+	}
+	previous := h.entries
+	h.entries = kept
+	if err := h.save(); err != nil {
+		h.entries = previous
+		return 0, err
+	}
+	return purged, nil
 }
 
 // save writes the log atomically (temp file + rename).

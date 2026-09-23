@@ -119,11 +119,11 @@ func (s *Server) wakeBatch(c *gin.Context) {
 	for _, d := range targets {
 		if err := s.sendWOL(d.MAC, wol.BroadcastForIP(d.IP, s.cfg.BroadcastIP)); err != nil {
 			slog.Error("wol batch send failed", slog.String("device", d.ID), slog.Any("err", err))
-			s.recordWake(d.MAC, false, err.Error(), 1)
+			s.recordWake(d.MAC, false, err.Error(), 1, "")
 			failed = append(failed, gin.H{"id": d.ID, "error": err.Error()})
 			continue
 		}
-		s.recordWake(d.MAC, true, "", 1)
+		s.recordWake(d.MAC, true, "", 1, "")
 		woken = append(woken, d.ID)
 	}
 	c.JSON(http.StatusOK, gin.H{
