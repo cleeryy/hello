@@ -66,7 +66,7 @@ func (s *Server) listDevices(c *gin.Context) {
 	switch sortBy {
 	case "name":
 		less = func(a, b *models.Device) bool {
-			if strings.ToLower(a.Name) == strings.ToLower(b.Name) {
+			if strings.EqualFold(a.Name, b.Name) {
 				return a.ID < b.ID
 			}
 			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
