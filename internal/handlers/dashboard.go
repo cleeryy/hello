@@ -14,13 +14,24 @@ func RegisterDashboard(r *gin.Engine) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, dashboardHTML)
 	})
+	r.GET("/manifest.json", func(c *gin.Context) {
+		c.Header("Content-Type", "application/manifest+json")
+		c.String(http.StatusOK, dashboardManifest)
+	})
 }
+
+// dashboardManifest makes the dashboard installable as a minimal PWA.
+const dashboardManifest = `{"name":"hello","short_name":"hello",` +
+	`"description":"Wake-on-LAN service","start_url":"/dashboard","scope":"/",` +
+	`"display":"standalone","background_color":"#fafaf9","theme_color":"#1c1917"}`
 
 const dashboardHTML = `<!doctype html>
 <html lang="en" class="h-full">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1c1917">
+<link rel="manifest" href="/manifest.json">
 <title>hello</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config={theme:{extend:{fontFamily:{sans:['system-ui','-apple-system','Segoe UI','Roboto','sans-serif']}}}}</script>
@@ -48,6 +59,17 @@ const dashboardHTML = `<!doctype html>
 <ul id="rows" class="mt-2 divide-y divide-stone-200 dark:divide-stone-800"><li class="py-6 text-sm text-stone-500">Enter your token, then Connect.</li></ul>
 </section>
 <section class="mt-4 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+<h2 class="text-sm font-semibold">Wake history</h2>
+<p class="mt-1 text-xs text-stone-500">Latest wake events, newest first.</p>
+<ul id="hist" class="mt-2 divide-y divide-stone-200 dark:divide-stone-800"><li class="py-4 text-sm text-stone-500">Connect to see history.</li></ul>
+</section>
+<section class="mt-4 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+<h2 class="text-sm font-semibold">Schedules</h2>
+<p class="mt-1 text-xs text-stone-500">Cron uses 5 fields (ex: 0 7 * * 1-5). New schedules start enabled.</p>
+<ul id="scheds" class="mt-2 divide-y divide-stone-200 dark:divide-stone-800"><li class="py-4 text-sm text-stone-500">Connect to see schedules.</li></ul>
+<form id="schedCreate" class="mt-2 grid grid-cols-1 sm:grid-cols-4 gap-2"><input id="sId" required placeholder="id (ex: nas-morning)" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"><select id="sDev" required class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"></select><input id="sCron" required placeholder="cron 0 7 * * *" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm font-mono dark:border-stone-700"><button class="rounded-xl border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800">Add schedule</button></form>
+</section>
+<section class="mt-4 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
 <h2 class="text-sm font-semibold">Discover</h2>
 <p class="mt-1 text-xs text-stone-500">Scan the LAN, then adopt what you recognise. One scan every 30s.</p>
 <div class="mt-2 flex flex-col sm:flex-row gap-2"><button id="scan" class="rounded-xl bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white">Scan the LAN</button><button id="adoptSel" disabled class="rounded-xl border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-100 disabled:opacity-50 dark:border-stone-700 dark:hover:bg-stone-800">Adopt selected</button></div>
@@ -72,7 +94,7 @@ const dashboardHTML = `<!doctype html>
 <script>
 const $=id=>document.getElementById(id);
 const say=t=>{$('msg').textContent=t||''};
-let devices=[],filter='all',ws=null,editing=null;
+let devices=[],filter='all',ws=null,editing=null,history=[],schedules=[];
 const token=()=>$('token').value.trim();
 async function api(path,opts={}){
   const t=token();if(!t)throw new Error('Enter API token first');
@@ -90,7 +112,7 @@ async function load(silent){
     const data=await api('/devices');devices=data.devices||data||[];
     const up=devices.filter(d=>(d.status||'unknown')==='up').length,down=devices.filter(d=>(d.status||'unknown')==='down').length;
     $('statUp').textContent=up;$('statDown').textContent=down;$('statUnknown').textContent=devices.length-up-down;
-    render();
+    render();loadHistory();loadSchedules();
   }catch(e){if(!silent){$('rows').innerHTML='<li class="py-6 text-sm text-rose-600">Error — '+String(e.message||e)+'</li>';}}
 }
 function render(){
@@ -112,6 +134,44 @@ function render(){
     del.onclick=async()=>{if(!confirm('Delete '+(d.name||id)+'?'))return;try{await api('/devices/'+encodeURIComponent(id),{method:'DELETE'});say('Deleted '+(d.name||id));load(true);}catch(e){say(String(e.message||e));}};
     li.append(w,e,del);ul.appendChild(li);
   }
+}
+function nameOf(id){const d=devices.find(x=>(x.id||'')===id);return d?(d.name||d.id||id):id;}
+function fmtTime(at){try{return new Date(Number(at)*1000).toLocaleString();}catch{return '';}}
+async function loadHistory(){
+  const ul=$('hist');if(!ul)return;
+  try{
+    const data=await api('/history?limit=20');history=data.history||[];ul.innerHTML='';
+    if(!history.length){ul.innerHTML='<li class="py-4 text-sm text-stone-500">No wake events yet.</li>';return;}
+    for(const h of history){
+      const li=document.createElement('li');li.className='flex flex-wrap items-center gap-3 py-2';
+      li.innerHTML='<div class="min-w-0 flex-1"><p class="truncate text-sm font-medium"></p><p class="truncate text-xs text-stone-500"></p></div><span></span>';
+      li.children[0].children[0].textContent=nameOf(h.device_id||'');
+      li.children[0].children[1].textContent=(h.trigger||'manual')+' · '+fmtTime(h.at);
+      li.children[1].className=h.success?'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200':'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200';
+      li.children[1].textContent=h.success?'sent':'failed';
+      ul.appendChild(li);
+    }
+  }catch(e){ul.innerHTML='<li class="py-4 text-sm text-stone-500">History unavailable.</li>';}
+}
+async function loadSchedules(){
+  const ul=$('scheds');if(!ul)return;
+  try{
+    const data=await api('/schedules');schedules=data.schedules||[];
+    const sel=$('sDev');if(sel){const cur=sel.value;sel.innerHTML='';for(const d of devices){const o=document.createElement('option');o.value=d.id||'';o.textContent=(d.name||d.id||'')+' ('+(d.id||'')+')';sel.appendChild(o);}if(cur)sel.value=cur;}
+    ul.innerHTML='';
+    if(!schedules.length){ul.innerHTML='<li class="py-4 text-sm text-stone-500">No schedules yet.</li>';return;}
+    for(const s of schedules){
+      const li=document.createElement('li');li.className='flex flex-wrap items-center gap-3 py-2';
+      li.innerHTML='<div class="min-w-0 flex-1"><p class="truncate text-sm font-medium"></p><p class="truncate font-mono text-xs text-stone-500"></p></div>';
+      li.children[0].children[0].textContent=nameOf(s.device_id||'');
+      li.children[0].children[1].textContent=s.cron||'';
+      const t=document.createElement('button');t.className='rounded-xl border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';t.textContent=s.enabled?'On':'Off';
+      t.onclick=async()=>{t.disabled=true;try{await api('/schedules/'+encodeURIComponent(s.id),{method:'PUT',body:JSON.stringify({id:s.id,device_id:s.device_id,cron:s.cron,enabled:!s.enabled})});loadSchedules();}catch(e){say(String(e.message||e));}finally{t.disabled=false;}};
+      const del=document.createElement('button');del.className='rounded-xl border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';del.textContent='Delete';
+      del.onclick=async()=>{if(!confirm('Delete schedule '+s.id+'?'))return;try{await api('/schedules/'+encodeURIComponent(s.id),{method:'DELETE'});loadSchedules();}catch(e){say(String(e.message||e));}};
+      li.append(t,del);ul.appendChild(li);
+    }
+  }catch(e){ul.innerHTML='<li class="py-4 text-sm text-stone-500">Schedules unavailable.</li>';}
 }
 let found=[];
 function scanMsg(t){$('scanMsg').textContent=t||'';}
@@ -158,6 +218,7 @@ $('search').oninput=render;
 document.querySelectorAll('#filters button').forEach(b=>b.onclick=()=>{filter=b.dataset.f;document.querySelectorAll('#filters button').forEach(x=>x.className='rounded-lg px-3 py-1.5 border border-stone-300 dark:border-stone-700');b.className='rounded-lg px-3 py-1.5 bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900';render();});
 $('create').onsubmit=async e=>{e.preventDefault();try{await api('/devices',{method:'POST',body:JSON.stringify({id:$('cId').value.trim(),name:$('cName').value.trim(),mac:$('cMac').value.trim(),ip:$('cIp').value.trim()||undefined})});say('Device added.');e.target.reset();load(true);}catch(err){say(String(err.message||err));}};
 $('editDlg').addEventListener('close',async()=>{if($('editDlg').returnValue!=='default'||!editing)return;const d=editing;try{await api('/devices/'+encodeURIComponent(d.id),{method:'PUT',body:JSON.stringify({id:d.id,name:$('eName').value.trim(),mac:$('eMac').value.trim(),ip:$('eIp').value.trim()||'',ping_enabled:$('ePing').checked,status:d.status||'unknown'})});say('Device saved.');editing=null;load(true);}catch(err){say(String(err.message||err));}});
+$('schedCreate').onsubmit=async e=>{e.preventDefault();try{await api('/schedules',{method:'POST',body:JSON.stringify({id:$('sId').value.trim(),device_id:$('sDev').value,cron:$('sCron').value.trim()})});say('Schedule added.');e.target.reset();loadSchedules();}catch(err){say(String(err.message||err));}};
 </script>
 </body>
 </html>`
