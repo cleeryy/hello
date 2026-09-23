@@ -24,6 +24,19 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "seed" {
+		src := "devices.example.json"
+		if len(os.Args) > 2 {
+			src = os.Args[2]
+		}
+		count, err := seedDevices(seedFile(), src)
+		if err != nil {
+			slog.Error("seed failed", slog.Any("err", err))
+			os.Exit(1)
+		}
+		slog.Info("seeded devices", slog.Int("count", count))
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("fatal", slog.Any("err", err))
 		os.Exit(1)
@@ -90,6 +103,11 @@ func run() error {
 				Error:    errMsg,
 			}); err != nil {
 				slog.Warn("history record failed", slog.Any("err", err))
+			}
+			if success {
+				if err := store.RecordWake(dev.ID, time.Now().Unix()); err != nil {
+					slog.Warn("wake counter update failed", slog.String("device", dev.ID), slog.Any("err", err))
+				}
 			}
 		})
 	go sch.Start(ctx)

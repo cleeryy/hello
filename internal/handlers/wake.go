@@ -155,13 +155,19 @@ func (s *Server) sendMagic(c *gin.Context, mac, broadcastIP string) {
 }
 
 // recordWake logs a manual wake to history, resolving the registry id when
-// the MAC belongs to a known device. A missing history or a logging failure
-// never breaks the wake response itself.
+// the MAC belongs to a known device. Wake counters bump even without a
+// history store: they are registry state, not log state. A missing history
+// or a logging failure never breaks the wake response itself.
 func (s *Server) recordWake(mac string, success bool, errMsg string, attempts int) {
+	deviceID, _ := s.store.LookupMAC(mac)
+	if success && deviceID != "" {
+		if err := s.store.RecordWake(deviceID, time.Now().Unix()); err != nil {
+			slog.Warn("wake counter update failed", slog.String("device", deviceID), slog.Any("err", err))
+		}
+	}
 	if s.hist == nil {
 		return
 	}
-	deviceID, _ := s.store.LookupMAC(mac)
 	entry := models.WakeEvent{
 		DeviceID: deviceID,
 		MAC:      mac,

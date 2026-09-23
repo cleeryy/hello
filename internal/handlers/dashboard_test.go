@@ -34,6 +34,11 @@ func TestDashboard_whenRequested(t *testing.T) {
 	require.Contains(t, w.Body.String(), "Schedules")
 	require.Contains(t, w.Body.String(), "/schedules")
 	require.Contains(t, w.Body.String(), "/manifest.json")
+	require.Contains(t, w.Body.String(), "/devices/wake-batch")
+	require.Contains(t, w.Body.String(), "Wake all down")
+	require.Contains(t, w.Body.String(), "/devices/export")
+	require.Contains(t, w.Body.String(), "per_page=500")
+	require.Contains(t, w.Body.String(), "eNotes")
 }
 
 // Given: le manifest PWA enregistré comme dans main

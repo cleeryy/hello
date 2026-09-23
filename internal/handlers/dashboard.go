@@ -54,7 +54,8 @@ const dashboardHTML = `<!doctype html>
 <div class="mt-2 flex flex-col sm:flex-row gap-2"><input id="token" type="password" autocomplete="off" placeholder="Bearer token" class="w-full rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-stone-500 dark:border-stone-700"><button id="connect" class="rounded-xl bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white">Connect</button></div>
 </section>
 <section class="mt-4 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
-<div class="flex flex-col sm:flex-row gap-2 sm:items-center"><input id="search" type="search" placeholder="Filter by name, MAC, IP…" class="w-full rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-stone-500 dark:border-stone-700"><div id="filters" class="flex gap-1 text-sm" role="group" aria-label="Filter by status"><button data-f="all" class="rounded-lg px-3 py-1.5 bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900">All</button><button data-f="up" class="rounded-lg px-3 py-1.5 border border-stone-300 dark:border-stone-700">Up</button><button data-f="down" class="rounded-lg px-3 py-1.5 border border-stone-300 dark:border-stone-700">Down</button><button data-f="unknown" class="rounded-lg px-3 py-1.5 border border-stone-300 dark:border-stone-700">Unknown</button></div></div>
+<div class="flex flex-col sm:flex-row gap-2 sm:items-center"><input id="search" type="search" placeholder="Filter by name, MAC, IP, tag…" class="w-full rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-stone-500 dark:border-stone-700"><div id="filters" class="flex gap-1 text-sm" role="group" aria-label="Filter by status"><button data-f="all" class="rounded-lg px-3 py-1.5 bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900">All</button><button data-f="up" class="rounded-lg px-3 py-1.5 border border-stone-300 dark:border-stone-700">Up</button><button data-f="down" class="rounded-lg px-3 py-1.5 border border-stone-300 dark:border-stone-700">Down</button><button data-f="unknown" class="rounded-lg px-3 py-1.5 border border-stone-300 dark:border-stone-700">Unknown</button></div></div>
+<div class="mt-2 flex flex-wrap items-center gap-2 text-sm"><label class="text-xs text-stone-500" for="sort">Sort</label><select id="sort" class="rounded-lg border border-stone-300 bg-transparent px-2 py-1.5 dark:border-stone-700"><option value="name">Name</option><option value="status">Status</option><option value="last_seen">Last seen</option><option value="wake_count">Wake count</option></select><button id="sortDir" title="Toggle direction" class="rounded-lg border border-stone-300 px-2 py-1.5 dark:border-stone-700">↑</button><span class="flex-1"></span><button id="wakeDown" class="rounded-lg border border-stone-300 px-3 py-1.5 hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800">Wake all down</button><button id="expBtn" class="rounded-lg border border-stone-300 px-3 py-1.5 hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800">Export</button></div>
 <div id="msg" role="status" class="min-h-6 mt-3 text-sm text-stone-500"></div>
 <ul id="rows" class="mt-2 divide-y divide-stone-200 dark:divide-stone-800"><li class="py-6 text-sm text-stone-500">Enter your token, then Connect.</li></ul>
 </section>
@@ -79,13 +80,15 @@ const dashboardHTML = `<!doctype html>
 <section class="mt-4 rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
 <h2 class="text-sm font-semibold">Add a device</h2>
 <p class="mt-1 text-xs text-stone-500">ID and MAC are required.</p>
-<form id="create" class="mt-2 grid grid-cols-1 sm:grid-cols-4 gap-2"><input id="cId" required placeholder="id (ex: nas)" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"><input id="cName" required placeholder="name" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"><input id="cMac" required placeholder="MAC AA:BB:CC:DD:EE:FF" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm font-mono dark:border-stone-700"><input id="cIp" placeholder="IP (optional)" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm font-mono dark:border-stone-700"><button class="sm:col-span-4 rounded-xl border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800">Add device</button></form>
+<form id="create" class="mt-2 grid grid-cols-1 sm:grid-cols-4 gap-2"><input id="cId" required placeholder="id (ex: nas)" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"><input id="cName" required placeholder="name" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"><input id="cMac" required placeholder="MAC AA:BB:CC:DD:EE:FF" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm font-mono dark:border-stone-700"><input id="cIp" placeholder="IP (optional)" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm font-mono dark:border-stone-700"><input id="cTags" placeholder="tags, comma separated (optional)" class="sm:col-span-2 rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"><input id="cNotes" placeholder="note (optional)" class="sm:col-span-2 rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"><button class="sm:col-span-4 rounded-xl border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800">Add device</button></form>
 </section>
 <dialog id="editDlg" class="rounded-2xl border border-stone-200 bg-white p-4 text-stone-900 backdrop:bg-black/40 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-100">
 <form id="editForm" method="dialog" class="grid grid-cols-1 gap-2 sm:min-w-96"><h2 class="text-sm font-semibold">Edit device</h2>
 <input id="eName" required placeholder="name" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700">
 <input id="eMac" required placeholder="MAC AA:BB:CC:DD:EE:FF" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm font-mono dark:border-stone-700">
 <input id="eIp" placeholder="IP (optional)" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm font-mono dark:border-stone-700">
+<input id="eTags" placeholder="tags, comma separated" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700">
+<input id="eNotes" placeholder="note" class="rounded-xl border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700">
 <label class="flex items-center gap-2 text-sm"><input id="ePing" type="checkbox" class="h-4 w-4"> Ping enabled</label>
 <div class="flex justify-end gap-2"><button value="cancel" formnovalidate class="rounded-xl border border-stone-300 px-4 py-2 text-sm dark:border-stone-700">Cancel</button><button id="eSave" value="default" class="rounded-xl bg-stone-900 px-4 py-2 text-sm font-medium text-white dark:bg-stone-100 dark:text-stone-900">Save</button></div></form>
 </dialog>
@@ -94,7 +97,7 @@ const dashboardHTML = `<!doctype html>
 <script>
 const $=id=>document.getElementById(id);
 const say=t=>{$('msg').textContent=t||''};
-let devices=[],filter='all',ws=null,editing=null,history=[],schedules=[];
+let devices=[],filter='all',ws=null,editing=null,history=[],schedules=[],sortKey='name',sortDir=1;
 const token=()=>$('token').value.trim();
 async function api(path,opts={}){
   const t=token();if(!t)throw new Error('Enter API token first');
@@ -109,27 +112,35 @@ function dot(st){if(st==='up')return 'h-1.5 w-1.5 rounded-full bg-emerald-500';i
 async function load(silent){
   if(!silent)say('');
   try{
-    const data=await api('/devices');devices=data.devices||data||[];
+    const data=await api('/devices?per_page=500');devices=data.devices||data||[];
     const up=devices.filter(d=>(d.status||'unknown')==='up').length,down=devices.filter(d=>(d.status||'unknown')==='down').length;
     $('statUp').textContent=up;$('statDown').textContent=down;$('statUnknown').textContent=devices.length-up-down;
     render();loadHistory();loadSchedules();
   }catch(e){if(!silent){$('rows').innerHTML='<li class="py-6 text-sm text-rose-600">Error — '+String(e.message||e)+'</li>';}}
 }
+function valOf(d,k){if(k==='wake_count')return Number(d.wake_count||0);if(k==='last_seen')return Number(d.last_seen||0);if(k==='status')return String(d.status||'unknown');return String(d.name||d.id||'').toLowerCase();}
 function render(){
   const q=($('search').value||'').toLowerCase(),ul=$('rows');ul.innerHTML='';
-  const list=devices.filter(d=>{const st=(d.status||'unknown');if(filter!=='all'&&st!==filter)return false;return ((d.name||'')+' '+(d.id||'')+' '+(d.mac||d.MAC||'')+' '+(d.ip||'')).toLowerCase().includes(q);});
+  const list=devices.filter(d=>{const st=(d.status||'unknown');if(filter!=='all'&&st!==filter)return false;return ((d.name||'')+' '+(d.id||'')+' '+(d.mac||d.MAC||'')+' '+(d.ip||'')+' '+((d.tags||[]).join(' '))+' '+(d.notes||'')).toLowerCase().includes(q);});
+  list.sort((a,b)=>{const x=valOf(a,sortKey),y=valOf(b,sortKey);return (x<y?-1:x>y?1:String(a.id||'').localeCompare(String(b.id||'')))*sortDir;});
   if(!list.length){ul.innerHTML='<li class="py-6 text-sm text-stone-500">Nothing here — adjust filter or add a device.</li>';return;}
   for(const d of list){
     const st=(d.status||'unknown'),id=d.id||'';
     const li=document.createElement('li');li.className='flex flex-wrap items-center gap-3 py-3';
-    li.innerHTML='<div class="min-w-0 flex-1"><p class="truncate text-sm font-medium"></p><p class="truncate font-mono text-xs text-stone-500"></p></div><span></span><span class="text-xs text-stone-500"></span>';
+    li.innerHTML='<div class="min-w-0 flex-1"><p class="truncate text-sm font-medium cursor-pointer hover:underline"></p><p class="truncate font-mono text-xs text-stone-500"></p><p class="truncate text-xs text-stone-500"></p><div class="mt-1 hidden text-xs text-stone-500"></div></div><span></span><span class="text-xs text-stone-500"></span>';
     li.children[0].children[0].textContent=d.name||id;li.children[0].children[1].textContent=(d.mac||d.MAC||'')+(d.ip?' · '+d.ip:'');
+    li.children[0].children[2].textContent=(d.tags||[]).map(t=>'#'+t).join(' ');
+    const det=li.children[0].children[3];
+    det.innerHTML='id · ping · wakes · last wake'+(d.notes?'<br>note: ':'');
+    det.childNodes[0].textContent=id+' · ping '+(d.ping_enabled?'on':'off')+' · '+(d.wake_count||0)+' wake(s) · '+(d.last_wake_at?fmtTime(d.last_wake_at):'never');
+    if(d.notes){const s=document.createElement('span');s.textContent=d.notes;det.appendChild(s);}
+    li.children[0].children[0].onclick=()=>det.classList.toggle('hidden');
     li.children[1].className=pill(st);li.children[1].innerHTML='<span class="'+dot(st)+'"></span>'+st;
     li.children[2].textContent=d.last_seen||d.lastSeen||'';
     const w=document.createElement('button');w.className='rounded-xl bg-stone-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white';w.textContent='Wake';
     w.onclick=async()=>{w.disabled=true;try{const r=await api('/devices/'+encodeURIComponent(id)+'/wake?retries=2&interval=2',{method:'POST'});const n=(r&&r.attempts)||1;say('Wake '+(d.name||id)+': '+n+' attempt'+(n===1?'':'s')+', '+((r&&r.up)?'host is up':'host not answering'));setTimeout(load,1500);}catch(e){say(String(e.message||e));}finally{w.disabled=false;}};
     const e=document.createElement('button');e.className='rounded-xl border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';e.textContent='Edit';
-    e.onclick=()=>{editing=d;$('eName').value=d.name||'';$('eMac').value=d.mac||d.MAC||'';$('eIp').value=d.ip||'';$('ePing').checked=!!d.ping_enabled;$('editDlg').showModal();};
+    e.onclick=()=>{editing=d;$('eName').value=d.name||'';$('eMac').value=d.mac||d.MAC||'';$('eIp').value=d.ip||'';$('ePing').checked=!!d.ping_enabled;$('eTags').value=(d.tags||[]).join(', ');$('eNotes').value=d.notes||'';$('editDlg').showModal();};
     const del=document.createElement('button');del.className='rounded-xl border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';del.textContent='Delete';
     del.onclick=async()=>{if(!confirm('Delete '+(d.name||id)+'?'))return;try{await api('/devices/'+encodeURIComponent(id),{method:'DELETE'});say('Deleted '+(d.name||id));load(true);}catch(e){say(String(e.message||e));}};
     li.append(w,e,del);ul.appendChild(li);
@@ -216,8 +227,12 @@ function live(){
 $('connect').onclick=()=>{say('Connecting…');load().then(()=>{say('Connected. Live updates on.');live();});};
 $('search').oninput=render;
 document.querySelectorAll('#filters button').forEach(b=>b.onclick=()=>{filter=b.dataset.f;document.querySelectorAll('#filters button').forEach(x=>x.className='rounded-lg px-3 py-1.5 border border-stone-300 dark:border-stone-700');b.className='rounded-lg px-3 py-1.5 bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900';render();});
-$('create').onsubmit=async e=>{e.preventDefault();try{await api('/devices',{method:'POST',body:JSON.stringify({id:$('cId').value.trim(),name:$('cName').value.trim(),mac:$('cMac').value.trim(),ip:$('cIp').value.trim()||undefined})});say('Device added.');e.target.reset();load(true);}catch(err){say(String(err.message||err));}};
-$('editDlg').addEventListener('close',async()=>{if($('editDlg').returnValue!=='default'||!editing)return;const d=editing;try{await api('/devices/'+encodeURIComponent(d.id),{method:'PUT',body:JSON.stringify({id:d.id,name:$('eName').value.trim(),mac:$('eMac').value.trim(),ip:$('eIp').value.trim()||'',ping_enabled:$('ePing').checked,status:d.status||'unknown'})});say('Device saved.');editing=null;load(true);}catch(err){say(String(err.message||err));}});
+$('create').onsubmit=async e=>{e.preventDefault();const tags=$('cTags').value.split(',').map(s=>s.trim()).filter(Boolean);try{await api('/devices',{method:'POST',body:JSON.stringify({id:$('cId').value.trim(),name:$('cName').value.trim(),mac:$('cMac').value.trim(),ip:$('cIp').value.trim()||undefined,tags:tags.length?tags:undefined,notes:$('cNotes').value.trim()||undefined})});say('Device added.');e.target.reset();load(true);}catch(err){say(String(err.message||err));}};
+$('editDlg').addEventListener('close',async()=>{if($('editDlg').returnValue!=='default'||!editing)return;const d=editing;const tags=$('eTags').value.split(',').map(s=>s.trim()).filter(Boolean);try{await api('/devices/'+encodeURIComponent(d.id),{method:'PUT',body:JSON.stringify({id:d.id,name:$('eName').value.trim(),mac:$('eMac').value.trim(),ip:$('eIp').value.trim()||'',ping_enabled:$('ePing').checked,status:d.status||'unknown',tags:tags,notes:$('eNotes').value.trim()})});say('Device saved.');editing=null;load(true);}catch(err){say(String(err.message||err));}});
+$('sort').onchange=()=>{sortKey=$('sort').value;render();};
+$('sortDir').onclick=()=>{sortDir=-sortDir;$('sortDir').textContent=sortDir===1?'↑':'↓';render();};
+$('wakeDown').onclick=async()=>{const down=devices.filter(d=>(d.status||'unknown')==='down');if(!down.length){say('Nothing down.');return;}if(!confirm('Wake '+down.length+' down device(s)?'))return;try{const r=await api('/devices/wake-batch',{method:'POST',body:JSON.stringify({ids:down.map(d=>d.id)})});say('Woke '+(r.woken||[]).length+'/'+(r.matched||[]).length+'.');setTimeout(load,1500);}catch(e){say(String(e.message||e));}};
+$('expBtn').onclick=async()=>{try{const t=token();if(!t)throw new Error('Enter API token first');const res=await fetch('/devices/export',{headers:{'Authorization':'Bearer '+t}});if(!res.ok)throw new Error('HTTP '+res.status);const blob=await res.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='devices-export.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);say('Exported.');}catch(e){say(String(e.message||e));}};
 $('schedCreate').onsubmit=async e=>{e.preventDefault();try{await api('/schedules',{method:'POST',body:JSON.stringify({id:$('sId').value.trim(),device_id:$('sDev').value,cron:$('sCron').value.trim()})});say('Schedule added.');e.target.reset();loadSchedules();}catch(err){say(String(err.message||err));}};
 </script>
 </body>

@@ -276,3 +276,23 @@ func (s *Storage) Delete(id string) error {
 	}
 	return nil
 }
+
+// RecordWake bumps the wake counters of a device in one locked write, so a
+// concurrent monitor status update cannot silently drop the increment.
+func (s *Storage) RecordWake(id string, at int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	d, ok := s.devices[id]
+	if !ok {
+		return fmt.Errorf("storage: record wake %s: %w", id, ErrNotFound)
+	}
+	previous := cloneDevices(s.devices)
+	d.WakeCount++
+	d.LastWakeAt = at
+	if err := s.save(); err != nil {
+		s.devices = previous
+		return err
+	}
+	return nil
+}

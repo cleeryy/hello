@@ -172,8 +172,54 @@ paths:
     get:
       tags: [Devices]
       summary: List devices
-      description: Unpaginated. The registry is local and small by design.
+      description: Filtered, sorted and paginated. The envelope always carries the total.
       operationId: listDevices
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DeviceStatus'
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive substring over id, name, MAC and IP
+          schema:
+            type: string
+        - name: tag
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [name, status, last_seen, wake_count]
+            default: name
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
       responses:
         '200':
           description: Current registry snapshot
@@ -183,6 +229,8 @@ paths:
                 $ref: '#/components/schemas/DeviceList'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     post:
       tags: [Devices]
       summary: Register a device
@@ -215,6 +263,183 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Devices]
+      summary: Delete several devices
+      description: Comma-separated ids. Unknown ids are reported, not fatal.
+      operationId: bulkDeleteDevices
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema:
+            type: string
+            example: pc-salon,pc-bureau
+      responses:
+        '200':
+          description: Per-id report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, not_found]
+                properties:
+                  deleted:
+                    type: array
+                    items:
+                      type: string
+                  not_found:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /devices/counts:
+    get:
+      tags: [Devices]
+      summary: Registry totals by reachability
+      operationId: deviceCounts
+      responses:
+        '200':
+          description: Cheap polling totals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [total, up, down, unknown]
+                properties:
+                  total:
+                    type: integer
+                  up:
+                    type: integer
+                  down:
+                    type: integer
+                  unknown:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /devices/export:
+    get:
+      tags: [Devices]
+      summary: Download the registry
+      description: Whole registry as a JSON array, served as attachment.
+      operationId: exportDevices
+      responses:
+        '200':
+          description: devices-export.json payload
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /devices/import:
+    post:
+      tags: [Devices]
+      summary: Bulk-load devices
+      description: >-
+        Every entry is validated before anything is written, so a bad batch
+        never leaves a partial registry. Modes are abort, skip and replace.
+      operationId: importDevices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [devices]
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/DeviceInput'
+                mode:
+                  type: string
+                  enum: [abort, skip, replace]
+                  default: abort
+      responses:
+        '201':
+          description: Created entries plus skipped ids
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [created, skipped]
+                properties:
+                  created:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Device'
+                  skipped:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /devices/wake-batch:
+    post:
+      tags: [Devices]
+      summary: Wake several devices at once
+      description: Select by explicit ids, by tag, or both; empty selection means the whole registry. Shares the wake cooldown. dry_run previews the target set without sending.
+      operationId: wakeBatch
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: string
+                tag:
+                  type: string
+                dry_run:
+                  type: boolean
+      responses:
+        '200':
+          description: Matched set plus per-device outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dry_run, matched, woken, failed]
+                properties:
+                  dry_run:
+                    type: boolean
+                  matched:
+                    type: array
+                    items:
+                      type: string
+                  woken:
+                    type: array
+                    items:
+                      type: string
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, error]
+                      properties:
+                        id:
+                          type: string
+                        error:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /devices/{id}:
     parameters:
       - $ref: '#/components/parameters/DeviceId'
@@ -258,6 +483,53 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+    patch:
+      tags: [Devices]
+      summary: Patch a device
+      description: JSON merge patch, only the keys present are changed. The id is immutable here.
+      operationId: patchDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name:
+                  type: string
+                mac:
+                  type: string
+                  pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+                ip:
+                  type: string
+                  format: ipv4
+                status:
+                  $ref: '#/components/schemas/DeviceStatus'
+                ping_enabled:
+                  type: boolean
+                notes:
+                  type: string
+                  maxLength: 500
+                tags:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: string
+              additionalProperties: false
+      responses:
+        '200':
+          description: Stored representation after patch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       tags: [Devices]
       summary: Delete a device
@@ -269,6 +541,36 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+  /devices/{id}/clone:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    post:
+      tags: [Devices]
+      summary: Copy a device under a new id
+      description: Counters and reachability reset; identity and network settings are kept.
+      operationId: cloneDevice
+      parameters:
+        - name: new_id
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '201':
+          description: The copy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /devices/{id}/wake:
     parameters:
       - $ref: '#/components/parameters/DeviceId'
@@ -576,6 +878,24 @@ components:
           type: integer
           format: int64
           description: Unix timestamp of the last up observation, 0 if never
+        notes:
+          type: string
+          maxLength: 500
+          description: Free-text note, trimmed on write
+        tags:
+          type: array
+          maxItems: 10
+          description: Lowercase slugs ([a-z0-9_-]), normalized and deduped on write
+          items:
+            type: string
+        wake_count:
+          type: integer
+          minimum: 0
+          description: Successful manual and scheduled wakes since registration
+        last_wake_at:
+          type: integer
+          format: int64
+          description: Unix timestamp of the last successful wake, absent if never
       additionalProperties: false
     DeviceInput:
       type: object
@@ -602,18 +922,33 @@ components:
         last_seen:
           type: integer
           format: int64
+        notes:
+          type: string
+          maxLength: 500
+        tags:
+          type: array
+          maxItems: 10
+          items:
+            type: string
       additionalProperties: false
     DeviceStatus:
       type: string
       enum: [up, down, unknown]
     DeviceList:
       type: object
-      required: [devices]
+      required: [devices, total, page, per_page]
       properties:
         devices:
           type: array
           items:
             $ref: '#/components/schemas/Device'
+        total:
+          type: integer
+          description: Matches across all pages, before slicing
+        page:
+          type: integer
+        per_page:
+          type: integer
       additionalProperties: false
     WakeEvent:
       type: object
