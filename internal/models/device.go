@@ -55,6 +55,7 @@ var (
 	ErrNotesLong   = errors.New("models: notes too long")
 	ErrInvalidTag  = errors.New("models: invalid tag")
 	ErrTooManyTags = errors.New("models: too many tags")
+	ErrInvalidMon  = errors.New("models: invalid monitor interval")
 )
 
 const (
@@ -62,6 +63,10 @@ const (
 	MaxNotesRunes = 500
 	// MaxTags caps how many tags a device can carry.
 	MaxTags = 10
+	// MinMonitorSecs and MaxMonitorSecs bound the per-device poll interval.
+	// Zero means the global monitor interval applies.
+	MinMonitorSecs = 5
+	MaxMonitorSecs = 86400
 )
 
 // tagPattern allows lowercase slugs: letters, digits, dash, underscore.
@@ -81,6 +86,9 @@ type Device struct {
 	Tags        []string `json:"tags,omitempty"`
 	WakeCount   int      `json:"wake_count"`
 	LastWakeAt  int64    `json:"last_wake_at,omitempty"`
+	// MonitorSecs overrides the global monitor interval for this device.
+	// Zero keeps the global cadence.
+	MonitorSecs int `json:"monitor_secs,omitempty"`
 }
 
 // Normalize fills defaults for absent fields.
@@ -113,6 +121,9 @@ func (d *Device) Normalize() {
 	if d.LastWakeAt < 0 {
 		d.LastWakeAt = 0
 	}
+	if d.MonitorSecs < 0 {
+		d.MonitorSecs = 0
+	}
 }
 
 // Validate checks the invariants of a device.
@@ -143,6 +154,9 @@ func (d *Device) Validate() error {
 		if !tagPattern.MatchString(tag) {
 			return fmt.Errorf("tag %q: %w", tag, ErrInvalidTag)
 		}
+	}
+	if d.MonitorSecs != 0 && (d.MonitorSecs < MinMonitorSecs || d.MonitorSecs > MaxMonitorSecs) {
+		return fmt.Errorf("monitor_secs %d: %w", d.MonitorSecs, ErrInvalidMon)
 	}
 	return nil
 }
