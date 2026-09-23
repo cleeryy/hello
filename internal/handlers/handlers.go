@@ -13,6 +13,7 @@ import (
 	"github.com/cleeryy/hello/internal/discover"
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
+	"github.com/cleeryy/hello/internal/ping"
 	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
@@ -31,6 +32,9 @@ type Server struct {
 	sendWOL    func(mac, broadcast string) error
 	limiter    *requestLimiter
 	adoptLimit *rateLimiter
+	// pingHost checks reachability for retry-until-up; stubbed in tests.
+	pingHost func(ip string, timeout time.Duration) bool
+	started  time.Time
 }
 
 // New returns a Server sending magic packets via wol.SendWOLPacket.
@@ -42,6 +46,8 @@ func New(cfg *config.Config, store *storage.Storage, hub *wshub.Hub) *Server {
 		sendWOL:    wol.SendWOLPacket,
 		limiter:    newRequestLimiter(wakeDiscoverCooldown),
 		adoptLimit: newRateLimiter(5, time.Minute),
+		pingHost:   ping.PingHost,
+		started:    time.Now(),
 	}
 }
 
@@ -101,6 +107,7 @@ func (s *Server) Mount(r *gin.Engine) {
 	guarded.DELETE("/devices/:id", s.deleteDevice)
 	guarded.POST("/devices/:id/wake", s.wakeDevice)
 	guarded.GET("/history", s.listHistory)
+	guarded.GET("/metrics", s.metrics)
 	if s.schedStore != nil {
 		guarded.GET("/schedules", s.listSchedules)
 		guarded.POST("/schedules", s.createSchedule)

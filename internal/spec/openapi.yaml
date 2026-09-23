@@ -275,8 +275,26 @@ paths:
     post:
       tags: [Devices]
       summary: Wake a registered device
-      description: Looks the device up by id, then sends a magic packet to its MAC.
+      description: Looks the device up by id, then sends a magic packet to its MAC. With retries>0 the packet is resent until the device answers a ping or retries run out; retries x interval must stay within 8s (server write timeout) and the device needs an IP.
       operationId: wakeDevice
+      parameters:
+        - name: retries
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5
+            default: 0
+        - name: interval
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5
+            default: 2
+            description: Seconds between retry attempts
       responses:
         '200':
           description: Magic packet sent
@@ -288,6 +306,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: Retry needs a device IP, or a parameter is out of range
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '500':
           $ref: '#/components/responses/InternalError'
   /history:
@@ -322,6 +346,21 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /metrics:
+    get:
+      tags: [Devices]
+      summary: Prometheus metrics
+      description: Wake counters by trigger and result, device and schedule gauges, uptime. Content type text/plain.
+      operationId: metrics
+      responses:
+        '200':
+          description: Prometheus text exposition
+          content:
+            text/plain:
+              schema:
+                type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
   /schedules:
@@ -601,6 +640,9 @@ components:
           enum: [manual, schedule]
         success:
           type: boolean
+        attempts:
+          type: integer
+          description: Packets sent for this entry (retry-until-up); absent when 1
         error:
           type: string
       additionalProperties: false
@@ -736,6 +778,14 @@ components:
         message:
           type: string
           example: magic packet sent to AA:BB:CC:DD:EE:FF !
+        attempts:
+          type: integer
+          description: Packets sent; only present on retry-until-up wakes
+          example: 3
+        up:
+          type: boolean
+          description: Whether the device answered a ping; only present on retry-until-up wakes
+          example: true
       additionalProperties: false
     StatusChange:
       type: object

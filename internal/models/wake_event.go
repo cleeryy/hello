@@ -36,7 +36,9 @@ type WakeEvent struct {
 	At       int64   `json:"at"`
 	Trigger  Trigger `json:"trigger"`
 	Success  bool    `json:"success"`
-	Error    string  `json:"error,omitempty"`
+	// Attempts counts sent packets for this entry (retry-until-up).
+	Attempts int    `json:"attempts,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // Validate checks the invariants of a wake event.

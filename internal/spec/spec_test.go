@@ -34,7 +34,7 @@ func TestEmbeddedSpec(t *testing.T) {
 	require.NotEmpty(t, doc.Info.Version)
 	paths := []string{
 		"/", "/health", "/ws", "/wake", "/wake/{macAddress}",
-		"/devices", "/devices/{id}", "/devices/{id}/wake", "/history",
+		"/devices", "/devices/{id}", "/devices/{id}/wake", "/history", "/metrics",
 		"/schedules", "/schedules/{id}", "/discover", "/discover/adopt",
 		"/openapi.yaml", "/docs",
 	}

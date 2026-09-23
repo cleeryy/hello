@@ -127,7 +127,7 @@ function render(){
     li.children[1].className=pill(st);li.children[1].innerHTML='<span class="'+dot(st)+'"></span>'+st;
     li.children[2].textContent=d.last_seen||d.lastSeen||'';
     const w=document.createElement('button');w.className='rounded-xl bg-stone-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white';w.textContent='Wake';
-    w.onclick=async()=>{w.disabled=true;try{await api('/devices/'+encodeURIComponent(id)+'/wake',{method:'POST'});say('Magic packet sent to '+(d.name||id));setTimeout(load,1500);}catch(e){say(String(e.message||e));}finally{w.disabled=false;}};
+    w.onclick=async()=>{w.disabled=true;try{const r=await api('/devices/'+encodeURIComponent(id)+'/wake?retries=2&interval=2',{method:'POST'});const n=(r&&r.attempts)||1;say('Wake '+(d.name||id)+': '+n+' attempt'+(n===1?'':'s')+', '+((r&&r.up)?'host is up':'host not answering'));setTimeout(load,1500);}catch(e){say(String(e.message||e));}finally{w.disabled=false;}};
     const e=document.createElement('button');e.className='rounded-xl border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';e.textContent='Edit';
     e.onclick=()=>{editing=d;$('eName').value=d.name||'';$('eMac').value=d.mac||d.MAC||'';$('eIp').value=d.ip||'';$('ePing').checked=!!d.ping_enabled;$('editDlg').showModal();};
     const del=document.createElement('button');del.className='rounded-xl border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';del.textContent='Delete';
