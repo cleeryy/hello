@@ -26,7 +26,7 @@ func (s *Server) scanNetwork(c *gin.Context) {
 			"discovery is not configured", nil)
 		return
 	}
-	var subnet, ok = querySubnet(c)
+	subnet, ok := querySubnet(c)
 	if !ok {
 		return
 	}
