@@ -54,15 +54,19 @@ func runCommand(args []string) (bool, error) {
 		fmt.Println(handlers.Version)
 		return true, nil
 	case "seed":
-		src := "devices.example.json"
-		if len(args) > 1 {
-			src = args[1]
+		src, force := "devices.example.json", false
+		for _, arg := range args[1:] {
+			if arg == "--force" {
+				force = true
+				continue
+			}
+			src = arg
 		}
-		count, err := seedDevices(seedFile(), src)
+		count, err := seedDevices(seedFile(), src, force)
 		if err != nil {
 			return true, err
 		}
-		slog.Info("seeded devices", slog.Int("count", count))
+		slog.Info("seeded devices", slog.Int("count", count), slog.Bool("force", force))
 		return true, nil
 	}
 	return false, nil
@@ -182,11 +186,12 @@ func run() error {
 				success = false
 			}
 			if _, err := hist.Record(models.WakeEvent{
-				DeviceID: dev.ID,
-				MAC:      dev.MAC,
-				Trigger:  models.TriggerSchedule,
-				Success:  success,
-				Error:    errMsg,
+				DeviceID:   dev.ID,
+				MAC:        dev.MAC,
+				Trigger:    models.TriggerSchedule,
+				Success:    success,
+				Error:      errMsg,
+				ScheduleID: sched.ID,
 			}); err != nil {
 				slog.Warn("history record failed", slog.Any("err", err))
 			}
@@ -211,6 +216,9 @@ func run() error {
 	disc := discover.New()
 	disc.SetCooldown(time.Duration(cfg.DiscoverCooldownSec) * time.Second)
 	disc.Concurrency = cfg.DiscoverConcurrency
+	if err := disc.SetScanFile(cfg.ScanFile); err != nil {
+		return err
+	}
 	if len(probePorts) > 0 {
 		disc.ProbePorts = probePorts
 	}

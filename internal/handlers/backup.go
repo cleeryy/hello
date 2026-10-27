@@ -313,6 +313,7 @@ func (s *Server) runtimeConfig(c *gin.Context) {
 		"history_cap":          cfg.HistoryCap,
 		"schedules_cap":        cfg.SchedulesCap,
 		"wake_cooldown_sec":    cfg.WakeCooldownSec,
+		"scan_file":            cfg.ScanFile,
 		"trusted_proxies":      cfg.TrustedProxies,
 		"cors_origins":         cfg.CORSOrigins,
 		"token_from_file":      cfg.APITokenFile != "",

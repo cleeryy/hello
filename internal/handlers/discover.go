@@ -41,6 +41,11 @@ func (s *Server) scanNetwork(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"hosts": hosts, "ignored": ignored})
 }
 
+// minScanPrefix rejects scans wider than a /22 (F-45): sweeping more than
+// ~1022 hosts burns the 90s request budget. The scanner keeps its own
+// host-count guard as a second line of defense.
+const minScanPrefix = 22
+
 // querySubnet parses an optional ?cidr= override. It reports false when it
 // already answered with a 422.
 func querySubnet(c *gin.Context) (*net.IPNet, bool) {
@@ -49,6 +54,11 @@ func querySubnet(c *gin.Context) (*net.IPNet, bool) {
 		if err != nil {
 			writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
 				fmt.Sprintf("invalid cidr %q", raw), nil)
+			return nil, false
+		}
+		if ones, _ := parsed.Mask.Size(); parsed.IP.To4() != nil && ones < minScanPrefix {
+			writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+				fmt.Sprintf("cidr %q is wider than /%d, narrow the range", raw, minScanPrefix), nil)
 			return nil, false
 		}
 		return parsed, true

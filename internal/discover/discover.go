@@ -2,10 +2,13 @@ package discover
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -53,6 +56,10 @@ type Scanner struct {
 	// lastReport remembers the outcome of the latest finished scan (F-49).
 	lastCount int
 	lastErr   string
+	lastCIDR  string
+	// scanFile persists the last scan state across restarts (F-54).
+	// Empty means in-memory only.
+	scanFile string
 }
 
 // New returns a Scanner probing common ports with a 30s cooldown.
@@ -93,6 +100,93 @@ func (s *Scanner) effectiveCooldown() time.Duration {
 	return cooldown
 }
 
+// scanPersist is the on-disk shape of the last scan state (F-54).
+// JSON field names are part of the persistence contract.
+type scanPersist struct {
+	LastScanAt int64  `json:"last_scan_at"`
+	LastHosts  int    `json:"last_hosts"`
+	LastCIDR   string `json:"last_cidr,omitempty"`
+	LastError  string `json:"last_error,omitempty"`
+}
+
+// SetScanFile wires persistence of the last scan state to path. An existing
+// file is loaded so GET /discover/status survives restarts; a missing file
+// starts empty, while an unreadable or corrupt file fails fast. Every
+// finished scan rewrites the file atomically with mode 0600.
+func (s *Scanner) SetScanFile(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scanFile = path
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("discover: read %s: %w", path, err)
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	var saved scanPersist
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		return fmt.Errorf("discover: decode %s: %w", path, err)
+	}
+	if saved.LastScanAt != 0 {
+		s.lastScan = time.Unix(saved.LastScanAt, 0)
+	}
+	s.lastCount = saved.LastHosts
+	s.lastCIDR = saved.LastCIDR
+	s.lastErr = saved.LastError
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("discover: chmod %s: %w", path, err)
+	}
+	return nil
+}
+
+// saveScanState persists the last scan outcome. Callers must hold the lock.
+func (s *Scanner) saveScanState() error {
+	if s.scanFile == "" {
+		return nil
+	}
+	raw, err := json.Marshal(scanPersist{
+		LastScanAt: s.lastScan.Unix(),
+		LastHosts:  s.lastCount,
+		LastCIDR:   s.lastCIDR,
+		LastError:  s.lastErr,
+	})
+	if err != nil {
+		return fmt.Errorf("discover: encode: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(s.scanFile), ".scan-*.tmp")
+	if err != nil {
+		return fmt.Errorf("discover: create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("discover: chmod temp file: %w", err)
+	}
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		return fmt.Errorf("discover: write temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("discover: sync temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("discover: close temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, s.scanFile); err != nil {
+		return fmt.Errorf("discover: replace %s: %w", s.scanFile, err)
+	}
+	return nil
+}
+
 // Scan probes the subnet then maps live IPs to MACs via the ARP table. It
 // refuses concurrent runs and enforces the cooldown, so callers can map both
 // failures to 429.
@@ -122,16 +216,16 @@ func (s *Scanner) Scan(ctx context.Context) ([]Host, error) {
 		var err error
 		subnet, err = detectSubnet()
 		if err != nil {
-			s.noteResult(0, err.Error())
+			s.noteResult(0, err.Error(), "")
 			return nil, err
 		}
 	}
 	hosts, err := s.sweepSubnet(ctx, subnet)
 	if err != nil {
-		s.noteResult(0, err.Error())
+		s.noteResult(0, err.Error(), subnet.String())
 		return nil, err
 	}
-	s.noteResult(len(hosts), "")
+	s.noteResult(len(hosts), "", subnet.String())
 	return hosts, nil
 }
 
@@ -163,10 +257,10 @@ func (s *Scanner) ScanSubnet(ctx context.Context, subnet *net.IPNet) ([]Host, er
 
 	hosts, err := s.sweepSubnet(ctx, subnet)
 	if err != nil {
-		s.noteResult(0, err.Error())
+		s.noteResult(0, err.Error(), subnet.String())
 		return nil, err
 	}
-	s.noteResult(len(hosts), "")
+	s.noteResult(len(hosts), "", subnet.String())
 	return hosts, nil
 }
 
@@ -222,12 +316,16 @@ func (s *Scanner) sweepSubnet(ctx context.Context, subnet *net.IPNet) ([]Host, e
 	return hosts, nil
 }
 
-// noteResult remembers the latest finished scan outcome.
-func (s *Scanner) noteResult(count int, errMsg string) {
+// noteResult remembers the latest finished scan outcome and persists it
+// when a scan file is wired. A persistence failure never fails the scan.
+func (s *Scanner) noteResult(count int, errMsg, cidr string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastCount = count
 	s.lastErr = errMsg
+	s.lastCIDR = cidr
+	// Persistence is best-effort: a failed write never fails the scan.
+	_ = s.saveScanState()
 }
 
 // Report is the latest finished scan outcome plus live guard state (F-49).
@@ -236,6 +334,7 @@ type Report struct {
 	RetryInS  int64  `json:"retry_in_s"`
 	LastScan  int64  `json:"last_scan_at"`
 	LastHosts int    `json:"last_hosts"`
+	LastCIDR  string `json:"last_cidr,omitempty"`
 	LastError string `json:"last_error,omitempty"`
 }
 
@@ -247,6 +346,7 @@ func (s *Scanner) Status() Report {
 	rep := Report{
 		Scanning:  s.scanning,
 		LastHosts: s.lastCount,
+		LastCIDR:  s.lastCIDR,
 		LastError: s.lastErr,
 	}
 	if !s.lastScan.IsZero() {

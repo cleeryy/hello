@@ -48,6 +48,37 @@ func (s *Server) monitorUptime(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"devices": out})
 }
 
+// deviceUptime reports one device's honest poll summary (F-57): raw check
+// counters from the monitor plus the latest recorded change and the
+// monitor start time. Unknown devices 404; never-polled devices report
+// zero checks with the monitor start time.
+func (s *Server) deviceUptime(c *gin.Context) {
+	dev, err := s.store.Get(c.Param("id"))
+	if err != nil {
+		writeErr(c, err)
+		return
+	}
+	detail, ok := s.mon.Detail(dev.ID)
+	if !ok {
+		detail = monitor.DeviceUptime{Since: s.mon.Since()}
+	}
+	up, total := detail.Up, detail.Total
+	down := total - up
+	percent := 0.0
+	if total > 0 {
+		percent = float64(up) / float64(total) * 100
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"device_id":   dev.ID,
+		"checks":      total,
+		"up":          up,
+		"down":        down,
+		"percent":     percent,
+		"last_change": detail.LastChange,
+		"since":       detail.Since,
+	})
+}
+
 // monitorFlapping lists devices flapping right now (4+ changes in 5 minutes).
 func (s *Server) monitorFlapping(c *gin.Context) {
 	devices := s.mon.Flapping()

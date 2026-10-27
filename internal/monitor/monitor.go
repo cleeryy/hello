@@ -56,6 +56,7 @@ type Monitor struct {
 	lastRun     time.Time
 	lastChecked int
 	lastChanged int
+	startedAt   time.Time
 }
 
 // New returns a Monitor polling every interval with a 2s per-host timeout.
@@ -72,6 +73,7 @@ func NewWithTimeout(store *storage.Storage, interval, timeout time.Duration) *Mo
 		stopCh:    make(chan struct{}),
 		uptime:    map[string]*uptimeStat{},
 		lastCheck: map[string]time.Time{},
+		startedAt: time.Now(),
 	}
 }
 
@@ -201,6 +203,36 @@ func (m *Monitor) Transitions() []Transition {
 	return out
 }
 
+// DeviceUptime is the honest per-device poll summary backing
+// GET /devices/:id/uptime (F-57): raw poll counters plus the latest
+// recorded transition and the monitor start time. ok is false when the
+// device was never polled.
+type DeviceUptime struct {
+	Up         int
+	Total      int
+	LastChange int64
+	Since      int64
+}
+
+// Detail reports the per-device poll summary; ok is false when the device
+// was never polled.
+func (m *Monitor) Detail(deviceID string) (DeviceUptime, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st, found := m.uptime[deviceID]
+	if !found || st.total == 0 {
+		return DeviceUptime{}, false
+	}
+	out := DeviceUptime{Up: st.up, Total: st.total, Since: m.startedAt.Unix()}
+	for _, t := range m.transitions {
+		if t.DeviceID == deviceID {
+			out.LastChange = t.At
+			break
+		}
+	}
+	return out, true
+}
+
 // Uptime reports polls answered up over polls performed since start.
 // ok is false when the device was never polled.
 func (m *Monitor) Uptime(deviceID string) (up, total int, ok bool) {
@@ -233,6 +265,14 @@ func (m *Monitor) Flapping() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Since reports the monitor start time as unix seconds, backing the
+// per-device uptime summary for devices never polled yet.
+func (m *Monitor) Since() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.startedAt.Unix()
 }
 
 // Status snapshots the monitor loop figures for /monitor and /health.

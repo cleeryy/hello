@@ -41,6 +41,8 @@ type Config struct {
 	WakeCooldownSec int
 	// IgnoredFile persists the discovery ignore list (F-47).
 	IgnoredFile string
+	// ScanFile persists the last scan state across restarts (F-54).
+	ScanFile string
 	// DiscoverIntervalSec runs a background LAN scan on a cadence, 0 disables (F-48).
 	DiscoverIntervalSec int
 	// DiscoverCooldownSec bounds how often scans run, floor 5s (F-63).
@@ -74,6 +76,7 @@ const (
 	maxSchedulesCap            = 1000
 	maxWakeCooldownSec         = 3600
 	defaultIgnoredFile         = "ignored.json"
+	defaultScanFile            = "scan.json"
 	maxDiscoverIntervalSec     = 86400
 	defaultDiscoverCooldown    = 30
 	maxDiscoverCooldown        = 600
@@ -107,6 +110,7 @@ func LoadConfig() (*Config, error) {
 		SchedulesCap:     boundedInt("SCHEDULES_CAP", defaultSchedulesCap, 1, maxSchedulesCap),
 		WakeCooldownSec:  boundedInt("WAKE_COOLDOWN_SEC", 0, 0, maxWakeCooldownSec),
 		IgnoredFile:      envOr("IGNORED_FILE", defaultIgnoredFile),
+		ScanFile:         envOr("SCAN_FILE", defaultScanFile),
 		// Auto-scan needs a sane floor: below a minute it falls back to off.
 		DiscoverIntervalSec: discoverIntervalSec(),
 		DiscoverCooldownSec: boundedInt("DISCOVER_COOLDOWN_SEC", defaultDiscoverCooldown, 5, maxDiscoverCooldown),
