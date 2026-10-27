@@ -109,7 +109,7 @@ func (m *Monitor) run(ctx context.Context) {
 }
 
 func (m *Monitor) poll() {
-	_, _, fired := m.checkDevices()
+	_, _, fired := m.checkDevices("")
 	for _, dev := range fired {
 		if m.OnStatusChange != nil {
 			m.OnStatusChange(dev)
@@ -119,7 +119,17 @@ func (m *Monitor) poll() {
 
 // Check runs one polling pass on demand and reports checked/changed counts.
 func (m *Monitor) Check() (checked, changed int) {
-	checked, changed, fired := m.checkDevices()
+	return m.check("")
+}
+
+// CheckOne probes a single device on demand. An unknown id reports zero
+// checks; the periodic loop keeps polling independently.
+func (m *Monitor) CheckOne(id string) (checked, changed int) {
+	return m.check(id)
+}
+
+func (m *Monitor) check(onlyID string) (checked, changed int) {
+	checked, changed, fired := m.checkDevices(onlyID)
 	for _, dev := range fired {
 		if m.OnStatusChange != nil {
 			m.OnStatusChange(dev)
@@ -128,11 +138,14 @@ func (m *Monitor) Check() (checked, changed int) {
 	return checked, changed
 }
 
-func (m *Monitor) checkDevices() (checked, changed int, fired []models.Device) {
+func (m *Monitor) checkDevices(onlyID string) (checked, changed int, fired []models.Device) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
 	for _, d := range m.store.GetAll() {
+		if onlyID != "" && d.ID != onlyID {
+			continue
+		}
 		if d.IP == "" || !d.PingEnabled {
 			continue
 		}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -143,4 +144,41 @@ func TestMonitorRoutesMissing(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, doRequest(s, http.MethodGet, "/monitor/status", nil).Code)
 	require.Equal(t, http.StatusNotFound, doRequest(s, http.MethodPost, "/monitor/check", nil).Code)
+}
+
+// Given: two ping-enabled devices
+// When: POST /monitor/check?device_id=pc1
+// Then: only pc1 is probed, pc2 keeps its status, and an unknown id 404s.
+func TestMonitorCheckOne(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newStorage(t, t.TempDir()+"/d.json")
+	for i, id := range []string{"pc1", "pc2"} {
+		require.NoError(t, store.Create(&models.Device{
+			ID: id, Name: id, MAC: fmt.Sprintf("00:11:22:33:44:%02d", i+1),
+			IP: "192.0.2.1", Status: models.StatusUnknown, PingEnabled: true,
+		}))
+	}
+	srv := New(&config.Config{}, store, nil).
+		WithMonitor(monitor.NewWithTimeout(store, time.Hour, 200*time.Millisecond))
+	r := gin.New()
+	srv.Mount(r)
+
+	w := doPOST(t, r, "/monitor/check?device_id=pc1", "")
+	require.Equal(t, http.StatusOK, w.Code)
+	var res struct {
+		Checked  int    `json:"checked"`
+		Changed  int    `json:"changed"`
+		DeviceID string `json:"device_id"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+	require.Equal(t, 1, res.Checked)
+	require.Equal(t, 1, res.Changed)
+	require.Equal(t, "pc1", res.DeviceID)
+
+	untouched, err := store.Get("pc2")
+	require.NoError(t, err)
+	require.Equal(t, models.StatusUnknown, untouched.Status)
+
+	w = doPOST(t, r, "/monitor/check?device_id=ghost", "")
+	require.Equal(t, http.StatusNotFound, w.Code)
 }

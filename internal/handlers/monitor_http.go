@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -10,6 +11,15 @@ import (
 
 // checkMonitor runs one immediate polling pass and reports what it saw.
 func (s *Server) checkMonitor(c *gin.Context) {
+	if id := strings.TrimSpace(c.Query("device_id")); id != "" {
+		if _, err := s.store.Get(id); err != nil {
+			writeErr(c, err)
+			return
+		}
+		checked, changed := s.mon.CheckOne(id)
+		c.JSON(http.StatusOK, gin.H{"checked": checked, "changed": changed, "device_id": id})
+		return
+	}
 	checked, changed := s.mon.Check()
 	c.JSON(http.StatusOK, gin.H{"checked": checked, "changed": changed})
 }
