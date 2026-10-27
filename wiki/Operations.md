@@ -105,7 +105,7 @@ token — configure Prometheus with an `Authorization: Bearer` header
 - **Discovery misses hosts**: check `DISCOVER_PORTS`, `DISCOVER_COOLDOWN_SEC`
   (429 = still cooling down), and the ignore list (`GET /discover/ignored`);
   ignored MACs/IPs never appear in scan results.
-- **429 on wake/adopt**: per-IP throttles (wake 10/min, adopt 5/min) or
+- **429 on wake/adopt**: per-client throttles (wake/scan 30s, adopt 5/min) or
   `WAKE_COOLDOWN_SEC`; honor `Retry-After` / `X-RateLimit-Reset`.
 - **TLS**: terminate at the reverse proxy (Caddy/Nginx/Traefik), trust
   only its IPs via `TRUSTED_PROXIES`, and set `CORS_ORIGINS` for the

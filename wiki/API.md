@@ -62,7 +62,7 @@ Validation failures return `422` with an `errors` map; `DELETE` returns
 | GET | `/devices/counts` | Totals per status |
 | GET | `/devices/export` | Registry JSON download |
 | POST | `/devices/import` | Validate-all atomic import, cap 200 |
-| GET | `/devices/:id` | Device detail (incl. counters) |
+| GET | `/devices/:id` | Device detail (counters + computed `next_run`) |
 | PUT | `/devices/:id` | Full replacement |
 | PATCH | `/devices/:id` | Partial update |
 | DELETE | `/devices/:id` | Remove (`204`) |
@@ -94,7 +94,7 @@ answers `up`. `WAKE_COOLDOWN_SEC` bounds manual wakes per device.
 | GET | `/history` | Filters `device_id`/`trigger`/`result`/`success`/`since`/`until`, `?order=`, `?limit=` |
 | GET | `/history/stats` | Totals + `top_devices` |
 | GET | `/history/export` | CSV download |
-| DELETE | `/history?before=` | Purge entries older than unix time |
+| DELETE | `/history?before=` | Purge entries older than an RFC3339 instant |
 
 ## Schedules
 

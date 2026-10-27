@@ -70,7 +70,7 @@ Every row below is implemented and covered by tests. `Where` is the surface:
 | F-01 | `PATCH /devices/:id` partial update, same rules as `PUT` | route | Done |
 | F-02 | `GET /devices` filters `?status=up&search=name&tag=lan` | route | Done |
 | F-03 | `GET /devices` sort `?sort=name\|status\|last_seen&order=asc\|desc` | route | Done |
-| F-04 | `GET /devices` pagination `?page=&per_page=` (cap 100, `total` meta) | route | Done |
+| F-04 | `GET /devices` pagination `?page=&per_page=` (default 100, cap 500, `total` meta) | route | Done |
 | F-05 | Bulk delete `DELETE /devices?ids=id1,id2` (cap 50, atomic) | route | Done |
 | F-06 | Clone `POST /devices/:id/clone?new_id=` (counters reset) | route | Done |
 | F-07 | `notes` field (max 500 chars, on POST/PUT/PATCH) | route | Done |
@@ -100,7 +100,7 @@ Every row below is implemented and covered by tests. `Where` is the surface:
 | F-26 | History filters `trigger`/`result`/`success`/`since`/`until`/`device_id` | route | Done |
 | F-27 | History `?order=asc\|desc` | route | Done |
 | F-28 | `GET /history/stats` | route | Done |
-| F-29 | Purge `DELETE /history?before=` (unix timestamp) | route | Done |
+| F-29 | Purge `DELETE /history?before=` (RFC3339 timestamp) | route | Done |
 | F-30 | History CSV `GET /history/export` | route | Done |
 | F-31 | `HISTORY_CAP` retention bound | env | Done |
 | F-32 | `attempts`/`note` exposed on history entries | route | Done |
@@ -220,8 +220,8 @@ the WebSocket origin check uses the same list.
 
 ### Throttles and cooldowns
 
-- Wake and discovery scans: max 10/min/IP with `429` + `Retry-After` and
-  `X-RateLimit-Limit/Remaining/Reset` headers.
+- Wake and discovery scans: one request per 30s per client (IP + token hash),
+  with `429` + `Retry-After` and `X-RateLimit-Limit/Remaining/Reset` headers.
 - Adopt: max 5/min/IP, same headers.
 - `WAKE_COOLDOWN_SEC` (0 = off, max 3600): per-device manual-wake cooldown,
   answered with `429` + `Retry-After`.
@@ -381,7 +381,7 @@ golangci-lint run ./...
 - `?token=` on `/ws` is deprecated (leaks in proxy logs), prefer the `Authorization` header
 - CORS defaults to same-origin; set `CORS_ORIGINS` only for explicit browser origins
 - WebSocket origin is locked to same-origin + `CORS_ORIGINS`
-- Wake/discover (`10/min/IP`) and adopt (`5/min/IP`) are throttled with `429` + `Retry-After` plus `X-RateLimit-*` headers
+- Wake/discover (30s per client) and adopt (`5/min/IP`) are throttled with `429` + `Retry-After` plus `X-RateLimit-*` headers
 - JSON files are written `0600` mono-instance; mount all of them in Compose
 - Webhook URLs are an SSRF surface: only operator-controlled `http(s)` URLs
 
