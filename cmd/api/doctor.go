@@ -113,12 +113,17 @@ func runDoctor(args []string) error {
 		pass("ignore-file", fmt.Sprintf("%s holds %d entries", ignoreFile, len(il.List())))
 	}
 
-	for _, bin := range []string{"ping", "arp"} {
-		if path, err := exec.LookPath(bin); err != nil {
-			fail("binary-"+bin, "not in PATH, discovery and ping fall back to TCP")
-		} else {
-			pass("binary-"+bin, path)
-		}
+	if path, err := exec.LookPath("ping"); err != nil {
+		fail("binary-ping", "not in PATH, ping falls back to TCP")
+	} else {
+		pass("binary-ping", path)
+	}
+	// arp is optional: discovery falls back to a TCP sweep without it, so a
+	// missing binary is reported but never fails the environment check.
+	if path, err := exec.LookPath("arp"); err != nil {
+		pass("binary-arp", "not in PATH, discovery falls back to TCP")
+	} else {
+		pass("binary-arp", path)
 	}
 
 	port := "8080"
