@@ -31,9 +31,13 @@ func PingICMP(ipAddress string, timeout time.Duration) bool {
 	return exec.CommandContext(ctx, "ping", args...).Run() == nil
 }
 
+// TCPPorts lists the fallback ports tried by PingTCP. Override it from
+// configuration at startup; tests shrink it to localhost-only ports.
+var TCPPorts = []string{"22", "80"}
+
 // PingTCP reports whether ipAddress accepts TCP on a well-known port.
 func PingTCP(ipAddress string, timeout time.Duration) bool {
-	for _, port := range []string{"22", "80"} {
+	for _, port := range TCPPorts {
 		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ipAddress, port), timeout)
 		if err != nil {
 			continue

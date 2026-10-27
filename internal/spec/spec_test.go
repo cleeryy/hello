@@ -34,7 +34,7 @@ func TestEmbeddedSpec(t *testing.T) {
 	require.NotEmpty(t, doc.Info.Version)
 	paths := []string{
 		"/", "/health", "/ws", "/wake", "/wake/{macAddress}",
-		"/devices", "/devices/{id}", "/devices/{id}/wake", "/history",
+		"/devices", "/devices/{id}", "/devices/{id}/wake", "/history", "/metrics",
 		"/schedules", "/schedules/{id}", "/discover", "/discover/adopt",
 		"/openapi.yaml", "/docs",
 	}
@@ -57,6 +57,84 @@ func TestEmbeddedSpec(t *testing.T) {
 		require.Contains(t, doc.Components.Schemas, s, "schema %s défini", s)
 	}
 	require.Contains(t, string(YAML), "application/problem+json")
+}
+
+// Given: la table de routes montée par handlers.Mount + RegisterDashboard
+// When: on la compare au document embarqué (forme OpenAPI, :param -> {param})
+// Then: chaque route a un path documenté avec les bonnes méthodes, en version 1.2.0.
+func TestEmbeddedSpecCoversAllRoutes(t *testing.T) {
+	var doc struct {
+		Info struct {
+			Version string `yaml:"version"`
+		} `yaml:"info"`
+		Paths map[string]map[string]any `yaml:"paths"`
+	}
+	require.NoError(t, yaml.Unmarshal(YAML, &doc))
+	require.Equal(t, "1.2.0", doc.Info.Version)
+
+	// Liste littérale dérivée de internal/handlers/handlers.go (Mount),
+	// internal/handlers/dashboard.go (RegisterDashboard) et docs.go.
+	routes := map[string][]string{
+		"/":                         {"get"},
+		"/health":                   {"get"},
+		"/docs":                     {"get"},
+		"/openapi.yaml":             {"get"},
+		"/dashboard":                {"get"},
+		"/manifest.json":            {"get"},
+		"/ws":                       {"get"},
+		"/wake":                     {"get", "post"},
+		"/wake/all":                 {"post"},
+		"/wake/at":                  {"post"},
+		"/wake/{macAddress}":        {"get", "post"},
+		"/discover":                 {"post"},
+		"/devices/wake-batch":       {"post"},
+		"/devices/wake":             {"post"},
+		"/wake/oneshots":            {"get", "post"},
+		"/wake/oneshots/{id}":       {"delete"},
+		"/devices":                  {"get", "post", "delete"},
+		"/devices/counts":           {"get"},
+		"/devices/export":           {"get"},
+		"/devices/import":           {"post"},
+		"/devices/{id}":             {"get", "put", "patch", "delete"},
+		"/devices/{id}/wake":        {"post"},
+		"/devices/{id}/clone":       {"post"},
+		"/devices/{id}/uptime":      {"get"},
+		"/history":                  {"get", "delete"},
+		"/history/stats":            {"get"},
+		"/history/export":           {"get"},
+		"/metrics":                  {"get"},
+		"/backup":                   {"get"},
+		"/restore":                  {"post"},
+		"/config":                   {"get"},
+		"/version":                  {"get"},
+		"/schedules":                {"get", "post"},
+		"/schedules/validate":       {"post"},
+		"/schedules/pause-all":      {"post"},
+		"/schedules/resume-all":     {"post"},
+		"/schedules/enable":         {"post"},
+		"/schedules/disable":        {"post"},
+		"/schedules/{id}":           {"put", "delete"},
+		"/schedules/{id}/history":   {"get"},
+		"/schedules/{id}/duplicate": {"post"},
+		"/schedules/{id}/fire":      {"post"},
+		"/discover/adopt":           {"post"},
+		"/discover/adopt-all":       {"post"},
+		"/discover/status":          {"get"},
+		"/discover/ignore":          {"get", "post", "delete"},
+		"/discover/ignored":         {"get", "post", "delete"},
+		"/monitor/check":            {"post"},
+		"/monitor/transitions":      {"get"},
+		"/monitor/uptime":           {"get"},
+		"/monitor/flapping":         {"get"},
+		"/monitor/status":           {"get"},
+	}
+	for path, methods := range routes {
+		ops, ok := doc.Paths[path]
+		require.True(t, ok, "route %s documentée", path)
+		for _, m := range methods {
+			require.Contains(t, ops, m, "%s %s documenté", m, path)
+		}
+	}
 }
 
 // Given: le document embarqué
@@ -84,7 +162,7 @@ func TestEmbeddedSpecSecurity(t *testing.T) {
 	require.Equal(t, "bearer", scheme.Scheme)
 	require.Contains(t, doc.Components.Responses, "Unauthorized")
 
-	public := map[string]bool{"/": true, "/health": true, "/openapi.yaml": true, "/docs": true}
+	public := map[string]bool{"/": true, "/health": true, "/openapi.yaml": true, "/docs": true, "/dashboard": true, "/manifest.json": true}
 	for path, ops := range doc.Paths {
 		for method, raw := range ops {
 			op, ok := raw.(map[string]any)

@@ -75,6 +75,9 @@ func TestHistory_whenSaveFailsRollsBackMemory(t *testing.T) {
 	dir := t.TempDir()
 	h, err := New(filepath.Join(dir, "history.json"))
 	require.NoError(t, err)
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based failure injection is ignored by root")
+	}
 	require.NoError(t, os.Chmod(dir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 

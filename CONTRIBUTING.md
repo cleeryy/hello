@@ -5,7 +5,8 @@ per PR, green CI before review.
 
 ## Setup
 
-Requirements: Go 1.26+, `jq` for the manual walkthrough.
+Requirements: Go 1.26 toolchain (`go 1.26.0` in `go.mod`), `jq` for the
+manual walkthrough.
 
 ```bash
 export DEFAULT_MAC=00:11:22:33:44:55
@@ -52,6 +53,19 @@ Read `CONTEXT.md` for the domain language first.
   `major` / `minor` / `patch` (default `patch`).
 - Keep `README.md`, `CONTEXT.md`, `CHANGELOG.md` and the wiki in sync
   when behavior changes. Dashboard copy stays terse and functional.
+
+## Where things go
+
+- New endpoint: handler in `internal/handlers/<domain>.go` (registered in
+  `Mount` in `handlers.go`), route test in
+  `internal/handlers/<domain>_test.go` (Given/When/Then, HTTP seam,
+  literal expectations), path in `internal/spec/openapi.yaml`, step in
+  `test-api.sh`, row in the README matrix.
+- New env var: field + validation in `internal/config/config.go`, line in
+  `.env.example`, row in the README config table and
+  `wiki/Operations.md`, redacted exposure in `GET /config` only.
+- New dashboard behavior: markup/JS in `internal/handlers/dashboard.go`
+  (SSR, no CDN), section in `wiki/Dashboard.md`.
 
 ## Security
 

@@ -34,6 +34,8 @@ go.work.sum
 # Runtime data files (local state, never committed)
 wake-history.json
 schedules.json
+scan.json
+ignored.json
 
 # Tool artefacts (local runs, never committed)
 .omo/

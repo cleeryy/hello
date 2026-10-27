@@ -140,6 +140,52 @@ func (s *Storage) Save() error {
 	return s.save()
 }
 
+// ValidateDevices normalizes and checks a full replacement batch without
+// persisting anything, so restore dry-runs enforce the exact same rules.
+func ValidateDevices(devices []*models.Device) ([]*models.Device, error) {
+	prepared := make([]*models.Device, 0, len(devices))
+	seen := make(map[string]struct{}, len(devices))
+	for _, device := range devices {
+		if device == nil {
+			return nil, fmt.Errorf("storage: replace: nil device")
+		}
+		device.Normalize()
+		if err := device.Validate(); err != nil {
+			return nil, fmt.Errorf("storage: replace %q: %w", device.ID, err)
+		}
+		if _, dup := seen[device.ID]; dup {
+			return nil, fmt.Errorf("storage: replace: duplicate device id %q", device.ID)
+		}
+		seen[device.ID] = struct{}{}
+		prepared = append(prepared, clone(device))
+	}
+	return prepared, nil
+}
+
+// ReplaceAll validates a full registry replacement, then performs one locked
+// write. On any persistence failure the in-memory registry is restored to
+// its prior state, so callers can treat restore as all-or-nothing.
+func (s *Storage) ReplaceAll(devices []*models.Device) ([]*models.Device, error) {
+	prepared, err := ValidateDevices(devices)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous := cloneDevices(s.devices)
+	fresh := make(map[string]*models.Device, len(prepared))
+	for _, device := range prepared {
+		fresh[device.ID] = clone(device)
+	}
+	s.devices = fresh
+	if err := s.save(); err != nil {
+		s.devices = previous
+		return nil, err
+	}
+	return prepared, nil
+}
+
 // Create validates and atomically inserts one device.
 func (s *Storage) Create(device *models.Device) error {
 	_, err := s.CreateMany([]*models.Device{device})
@@ -270,6 +316,62 @@ func (s *Storage) Delete(id string) error {
 	}
 	previous := cloneDevices(s.devices)
 	delete(s.devices, id)
+	if err := s.save(); err != nil {
+		s.devices = previous
+		return err
+	}
+	return nil
+}
+
+// DeleteMany removes every existing id in one locked write, reporting
+// unknown ids without failing. Deduplicated ids collapse to one entry. On
+// any persistence failure the in-memory registry is restored to its prior
+// state and the error is returned, so callers can treat bulk delete as
+// all-or-nothing.
+func (s *Storage) DeleteMany(ids []string) (deleted []string, notFound []string, err error) {
+	seen := make(map[string]struct{}, len(ids))
+	ordered := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ordered = append(ordered, id)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous := cloneDevices(s.devices)
+	deleted = []string{}
+	notFound = []string{}
+	for _, id := range ordered {
+		if _, ok := s.devices[id]; !ok {
+			notFound = append(notFound, id)
+			continue
+		}
+		delete(s.devices, id)
+		deleted = append(deleted, id)
+	}
+	if err := s.save(); err != nil {
+		s.devices = previous
+		return nil, nil, err
+	}
+	return deleted, notFound, nil
+}
+
+// RecordWake bumps the wake counters of a device in one locked write, so a
+// concurrent monitor status update cannot silently drop the increment.
+func (s *Storage) RecordWake(id string, at int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	d, ok := s.devices[id]
+	if !ok {
+		return fmt.Errorf("storage: record wake %s: %w", id, ErrNotFound)
+	}
+	previous := cloneDevices(s.devices)
+	d.WakeCount++
+	d.LastWakeAt = at
 	if err := s.save(); err != nil {
 		s.devices = previous
 		return err

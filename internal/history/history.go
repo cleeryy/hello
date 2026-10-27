@@ -2,9 +2,12 @@ package history
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +17,10 @@ import (
 // defaultCapacity bounds the ring buffer and the persisted file.
 const defaultCapacity = 200
 
+// ErrTooMany is returned when a restore payload holds more entries than the
+// retention bound. Restore refuses instead of silently truncating.
+var ErrTooMany = errors.New("history: retention quota reached")
+
 // History is an append-only, size-bounded log of sent magic packets,
 // persisted to disk and safe for concurrent use. Newest entries come first.
 type History struct {
@@ -22,6 +29,10 @@ type History struct {
 	file     string
 	capacity int
 	seq      uint64
+	// wakeCounts tallies recorded packets by trigger and result for /metrics.
+	// First index: 0 = manual, 1 = schedule. Second index: 0 = ok, 1 = error.
+	wakeCounts [2][2]uint64
+	startedAt  time.Time
 }
 
 // New opens the history at filepath. Missing files start empty; unreadable or
@@ -30,8 +41,16 @@ func New(filepath string) (*History, error) {
 	return newWithCapacity(filepath, defaultCapacity)
 }
 
+// NewWithCapacity opens the history with a custom retention bound.
+func NewWithCapacity(filepath string, capacity int) (*History, error) {
+	if capacity <= 0 {
+		capacity = defaultCapacity
+	}
+	return newWithCapacity(filepath, capacity)
+}
+
 func newWithCapacity(filepath string, capacity int) (*History, error) {
-	h := &History{file: filepath, capacity: capacity}
+	h := &History{file: filepath, capacity: capacity, startedAt: time.Now()}
 	data, err := os.ReadFile(filepath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -84,29 +103,202 @@ func (h *History) Record(e models.WakeEvent) (models.WakeEvent, error) {
 		h.seq = previousSeq
 		return models.WakeEvent{}, err
 	}
+	h.wakeCounts[triggerIndex(e.Trigger)][resultIndex(e.Success)]++
 	return e, nil
+}
+
+func triggerIndex(t models.Trigger) int {
+	if t == models.TriggerSchedule {
+		return 1
+	}
+	return 0
+}
+
+func resultIndex(ok bool) int {
+	if ok {
+		return 0
+	}
+	return 1
+}
+
+// Stats snapshots wake counters, retention size, and start time.
+type Stats struct {
+	ManualOK, ManualErr, ScheduleOK, ScheduleErr uint64
+	StartedAt                                    time.Time
+	Size                                         int
+}
+
+// Stats returns a consistent snapshot of the counters and retention size.
+func (h *History) Stats() Stats {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return Stats{
+		ManualOK:    h.wakeCounts[0][0],
+		ManualErr:   h.wakeCounts[0][1],
+		ScheduleOK:  h.wakeCounts[1][0],
+		ScheduleErr: h.wakeCounts[1][1],
+		StartedAt:   h.startedAt,
+		Size:        len(h.entries),
+	}
+}
+
+// ValidateEvents checks restore candidates without persisting anything,
+// so restore dry-runs enforce the exact same rules.
+func ValidateEvents(entries []models.WakeEvent) error {
+	for i := range entries {
+		if err := entries[i].Validate(); err != nil {
+			return fmt.Errorf("history: restore index %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// Cap returns the retention bound restores are validated against.
+func (h *History) Cap() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.capacity
+}
+
+// maxSeqOf returns the highest sequence number carried by entry ids of the
+// form h-<nanos>-<seq>. Ids that do not parse are ignored.
+func maxSeqOf(entries []models.WakeEvent) uint64 {
+	var max uint64
+	for _, e := range entries {
+		parts := strings.Split(e.ID, "-")
+		if len(parts) < 3 {
+			continue
+		}
+		n, err := strconv.ParseUint(parts[len(parts)-1], 10, 64)
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max
+}
+
+// Restore replaces the log with previously exported entries, keeping their
+// ids and timestamps. Payloads over capacity are rejected, never truncated.
+// The sequence counter only moves forward, so ids minted after a restore
+// never collide with restored ones. Session counters are statistics, not
+// log state, and are left untouched. On persistence failure memory is
+// rolled back.
+func (h *History) Restore(entries []models.WakeEvent) error {
+	if err := ValidateEvents(entries); err != nil {
+		return err
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if len(entries) > h.capacity {
+		return fmt.Errorf("%w: at most %d entries", ErrTooMany, h.capacity)
+	}
+	previous := append([]models.WakeEvent(nil), h.entries...)
+	previousSeq := h.seq
+	fresh := append([]models.WakeEvent(nil), entries...)
+	h.entries = fresh
+	if peak := maxSeqOf(fresh); peak > h.seq {
+		h.seq = peak
+	}
+	if err := h.save(); err != nil {
+		h.entries = previous
+		h.seq = previousSeq
+		return err
+	}
+	return nil
 }
 
 // List returns stored entries newest-first, optionally filtered by device.
 // A non-positive limit selects the default page of 50.
 func (h *History) List(deviceID string, limit int) []models.WakeEvent {
+	return h.ListFiltered(Filter{DeviceID: deviceID}, limit)
+}
+
+// Filter selects history entries across device, trigger, result, time,
+// schedule, and order. Zero values disable their dimension; Since/Before
+// are unix seconds. Order is "asc" or "desc" (default newest-first).
+type Filter struct {
+	DeviceID   string
+	Trigger    models.Trigger
+	Success    *bool
+	Since      int64
+	Before     int64
+	ScheduleID string
+	Order      string
+}
+
+// ListFiltered returns stored entries matching f. Default order is
+// newest-first; Order "asc" returns oldest-first. A non-positive limit
+// selects the default page of 50.
+func (h *History) ListFiltered(f Filter, limit int) []models.WakeEvent {
 	if limit <= 0 {
 		limit = 50
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	out := make([]models.WakeEvent, 0, min(limit, len(h.entries)))
+	matched := make([]models.WakeEvent, 0, len(h.entries))
 	for _, e := range h.entries {
-		if deviceID != "" && e.DeviceID != deviceID {
+		if f.DeviceID != "" && e.DeviceID != f.DeviceID {
 			continue
 		}
-		out = append(out, e)
-		if len(out) >= limit {
-			break
+		if f.Trigger != "" && e.Trigger != f.Trigger {
+			continue
+		}
+		if f.Success != nil && e.Success != *f.Success {
+			continue
+		}
+		if f.Since != 0 && e.At < f.Since {
+			continue
+		}
+		if f.Before != 0 && e.At >= f.Before {
+			continue
+		}
+		if f.ScheduleID != "" && e.ScheduleID != f.ScheduleID {
+			continue
+		}
+		matched = append(matched, e)
+	}
+	if f.Order == "asc" {
+		for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
+			matched[i], matched[j] = matched[j], matched[i]
 		}
 	}
-	return out
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched
+}
+
+// Purge drops entries recorded strictly before the unix timestamp,
+// persists, and returns the removed count.
+func (h *History) Purge(before int64) (int, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	kept := h.entries[:0:0]
+	purged := 0
+	for _, e := range h.entries {
+		if e.At < before {
+			purged++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if purged == 0 {
+		return 0, nil
+	}
+	previous := h.entries
+	h.entries = kept
+	if err := h.save(); err != nil {
+		h.entries = previous
+		return 0, err
+	}
+	return purged, nil
 }
 
 // save writes the log atomically (temp file + rename).

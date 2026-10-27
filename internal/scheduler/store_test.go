@@ -40,6 +40,9 @@ func TestStore_whenSaveFailsRollsBackMemory(t *testing.T) {
 	st := newScheduleStore(t, filepath.Join(dir, "schedules.json"))
 	_, err := st.Create(models.Schedule{ID: "one", DeviceID: "pc", Cron: "0 7 * * *"})
 	require.NoError(t, err)
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based failure injection is ignored by root")
+	}
 	require.NoError(t, os.Chmod(dir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 

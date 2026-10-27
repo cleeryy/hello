@@ -13,6 +13,9 @@ import (
 	"github.com/cleeryy/hello/internal/discover"
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
+	"github.com/cleeryy/hello/internal/monitor"
+	"github.com/cleeryy/hello/internal/notify"
+	"github.com/cleeryy/hello/internal/ping"
 	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/storage"
 	wshub "github.com/cleeryy/hello/internal/websocket"
@@ -28,9 +31,26 @@ type Server struct {
 	schedStore *scheduler.Store
 	sched      *scheduler.Scheduler
 	disc       *discover.Scanner
+	ignore     *discover.IgnoreList
+	mon        *monitor.Monitor
 	sendWOL    func(mac, broadcast string) error
 	limiter    *requestLimiter
 	adoptLimit *rateLimiter
+	// statusNotify and wakeNotify post webhook events; nil means disabled.
+	statusNotify *notify.Sender
+	wakeNotify   *notify.Sender
+	// Restore apply seams. Nil means "call the wired store": tests set
+	// these to force a mid-restore failure and assert all-or-nothing
+	// rollback without touching the filesystem.
+	applyDevices   func([]*models.Device) ([]*models.Device, error)
+	applySchedules func([]models.Schedule) ([]models.Schedule, error)
+	applyHistory   func([]models.WakeEvent) error
+	applyIgnore    func([]discover.Entry) error
+	// pingHost checks reachability for retry-until-up; stubbed in tests.
+	pingHost func(ip string, timeout time.Duration) bool
+	started  time.Time
+	// oneshots holds pending delayed wakes (in-memory, ephemeral).
+	oneshots *oneshotRegistry
 }
 
 // New returns a Server sending magic packets via wol.SendWOLPacket.
@@ -42,6 +62,9 @@ func New(cfg *config.Config, store *storage.Storage, hub *wshub.Hub) *Server {
 		sendWOL:    wol.SendWOLPacket,
 		limiter:    newRequestLimiter(wakeDiscoverCooldown),
 		adoptLimit: newRateLimiter(5, time.Minute),
+		pingHost:   ping.PingHost,
+		started:    time.Now(),
+		oneshots:   newOneshotRegistry(),
 	}
 }
 
@@ -59,10 +82,45 @@ func (s *Server) WithSchedules(store *scheduler.Store, sched *scheduler.Schedule
 	return s
 }
 
+// WithNotify wires webhook senders; nil senders stay disabled.
+func (s *Server) WithNotify(status, wake *notify.Sender) *Server {
+	s.statusNotify = status
+	s.wakeNotify = wake
+	return s
+}
+
 // WithDiscover wires the LAN scanner; without it the discover routes stay
 // unregistered and onboarding stays manual.
 func (s *Server) WithDiscover(d *discover.Scanner) *Server {
 	s.disc = d
+	return s
+}
+
+// WithIgnoreList wires the discovery denylist; without it scan results are
+// unfiltered and the ignore routes stay unregistered.
+func (s *Server) WithIgnoreList(il *discover.IgnoreList) *Server {
+	s.ignore = il
+	return s
+}
+
+// NotifyStatus fans a reachability change out to the realtime hub and the
+// status webhook. Main wires it as the monitor callback so the status
+// sender is exercised through the Server and stays testable.
+func (s *Server) NotifyStatus(dev models.Device) {
+	if s.hub != nil {
+		s.hub.Broadcast(dev)
+	}
+	s.statusNotify.Send(notify.StatusPayload{
+		DeviceID: dev.ID,
+		Status:   string(dev.Status),
+		At:       time.Now().Unix(),
+	})
+}
+
+// WithMonitor wires the reachability monitor; without it the monitor routes
+// stay unregistered.
+func (s *Server) WithMonitor(m *monitor.Monitor) *Server {
+	s.mon = m
 	return s
 }
 
@@ -74,7 +132,7 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, store *storage.Storage, h
 // Mount registers every route. Docs, welcome, and health stay public;
 // everything else requires the API token when one is configured.
 func (s *Server) Mount(r *gin.Engine) {
-	r.Use(gin.Recovery(), securityHeaders(), requestBodyLimit())
+	r.Use(gin.Recovery(), securityHeaders(), requestBodyLimit(), requestID())
 	if origins, err := s.cfg.ParseCORSOrigins(); err == nil {
 		r.Use(corsMiddleware(origins))
 	}
@@ -90,26 +148,73 @@ func (s *Server) Mount(r *gin.Engine) {
 	throttled := guarded.Group("/", throttle(s.limiter))
 	throttled.POST("/wake", s.wakeDefault)
 	throttled.GET("/wake", s.wakeDefault)
+	throttled.POST("/wake/all", s.wakeFiltered)
+	throttled.POST("/wake/at", s.createOneshot)
 	throttled.POST("/wake/:macAddress", s.wakeMAC)
 	throttled.GET("/wake/:macAddress", s.wakeMAC)
 	throttled.POST("/discover", s.scanNetwork)
+	throttled.POST("/devices/wake-batch", s.wakeBatch)
+	throttled.POST("/devices/wake", s.wakeFiltered)
+	throttled.POST("/wake/oneshots", s.createOneshot)
 
 	guarded.GET("/devices", s.listDevices)
 	guarded.POST("/devices", s.createDevice)
+	guarded.DELETE("/devices", s.bulkDeleteDevices)
+	guarded.GET("/devices/counts", s.deviceCounts)
+	guarded.GET("/devices/export", s.exportDevices)
+	guarded.POST("/devices/import", s.importDevices)
 	guarded.GET("/devices/:id", s.getDevice)
 	guarded.PUT("/devices/:id", s.updateDevice)
+	guarded.PATCH("/devices/:id", s.patchDevice)
 	guarded.DELETE("/devices/:id", s.deleteDevice)
 	guarded.POST("/devices/:id/wake", s.wakeDevice)
+	guarded.POST("/devices/:id/clone", s.cloneDevice)
 	guarded.GET("/history", s.listHistory)
+	guarded.GET("/history/stats", s.historyStats)
+	guarded.GET("/history/export", s.exportHistory)
+	guarded.DELETE("/history", s.purgeHistory)
+	guarded.GET("/metrics", s.metrics)
+	guarded.GET("/backup", s.backup)
+	guarded.POST("/restore", s.restore)
+	guarded.GET("/config", s.runtimeConfig)
+	guarded.GET("/wake/oneshots", s.listOneshots)
+	guarded.DELETE("/wake/oneshots/:id", s.cancelOneshot)
 	if s.schedStore != nil {
 		guarded.GET("/schedules", s.listSchedules)
 		guarded.POST("/schedules", s.createSchedule)
+		guarded.POST("/schedules/validate", s.validateSchedule)
+		guarded.POST("/schedules/pause-all", s.pauseSchedules)
+		guarded.POST("/schedules/resume-all", s.resumeSchedules)
+		guarded.POST("/schedules/enable", s.enableSchedules)
+		guarded.POST("/schedules/disable", s.disableSchedules)
+		guarded.GET("/schedules/:id/history", s.scheduleHistory)
 		guarded.PUT("/schedules/:id", s.updateSchedule)
 		guarded.DELETE("/schedules/:id", s.deleteSchedule)
+		guarded.POST("/schedules/:id/duplicate", s.duplicateSchedule)
+		guarded.POST("/schedules/:id/fire", s.fireScheduleNow)
 	}
 	if s.disc != nil {
 		guarded.POST("/discover/adopt", s.adoptHosts)
+		guarded.GET("/discover/status", s.discoverStatus)
+		throttled.POST("/discover/adopt-all", s.adoptAll)
 	}
+	if s.ignore != nil {
+		guarded.GET("/discover/ignore", s.listIgnore)
+		guarded.POST("/discover/ignore", s.addIgnore)
+		guarded.DELETE("/discover/ignore", s.deleteIgnore)
+		guarded.GET("/discover/ignored", s.listIgnore)
+		guarded.POST("/discover/ignored", s.addIgnore)
+		guarded.DELETE("/discover/ignored", s.deleteIgnore)
+	}
+	if s.mon != nil {
+		guarded.GET("/devices/:id/uptime", s.deviceUptime)
+		guarded.POST("/monitor/check", s.checkMonitor)
+		guarded.GET("/monitor/transitions", s.monitorTransitions)
+		guarded.GET("/monitor/uptime", s.monitorUptime)
+		guarded.GET("/monitor/flapping", s.monitorFlapping)
+		guarded.GET("/monitor/status", s.monitorStatus)
+	}
+	guarded.GET("/version", s.version)
 }
 
 func (s *Server) welcome(c *gin.Context) {
@@ -119,8 +224,49 @@ func (s *Server) welcome(c *gin.Context) {
 	})
 }
 
+// Version is the build version reported by /health and /version.
+// Release builds override it with -ldflags "-X .../handlers.Version=vX.Y.Z".
+var Version = "dev"
+
+func (s *Server) version(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"version": Version})
+}
+
+// health stays a 200 liveness probe and also reports load-bearing counts
+// so dashboards and uptime checks get one cheap call.
 func (s *Server) health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	var up, down, unknown int
+	for _, d := range s.store.GetAll() {
+		switch d.Status {
+		case models.StatusUp:
+			up++
+		case models.StatusDown:
+			down++
+		default:
+			unknown++
+		}
+	}
+	schedTotal, schedEnabled := 0, 0
+	if s.schedStore != nil {
+		for _, item := range s.schedStore.All() {
+			schedTotal++
+			if item.Enabled {
+				schedEnabled++
+			}
+		}
+	}
+	histSize := 0
+	if s.hist != nil {
+		histSize = s.hist.Stats().Size
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":         "ok",
+		"version":        Version,
+		"uptime_seconds": int64(time.Since(s.started).Seconds()),
+		"devices":        gin.H{"total": up + down + unknown, "up": up, "down": down, "unknown": unknown},
+		"schedules":      gin.H{"total": schedTotal, "enabled": schedEnabled},
+		"history_size":   histSize,
+	})
 }
 
 const problemContentType = "application/problem+json"
@@ -165,6 +311,10 @@ func writeErr(c *gin.Context, err error) {
 		errors.Is(err, models.ErrInvalidMAC),
 		errors.Is(err, models.ErrInvalidIP),
 		errors.Is(err, models.ErrInvalidStat),
+		errors.Is(err, models.ErrNotesLong),
+		errors.Is(err, models.ErrInvalidTag),
+		errors.Is(err, models.ErrTooManyTags),
+		errors.Is(err, models.ErrInvalidMon),
 		errors.Is(err, wol.ErrInvalidMAC):
 		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity", err.Error(), nil)
 	default:

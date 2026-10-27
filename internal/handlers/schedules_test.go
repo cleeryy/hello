@@ -33,7 +33,7 @@ func scheduleRouter(t *testing.T) (*gin.Engine, *scheduler.Scheduler) {
 			}
 			return *dev, nil
 		},
-		func(models.Schedule, models.Device) {})
+		func(models.Schedule, models.Device) (bool, string) { return true, "" })
 	srv := New(cfg, devStore, wshub.NewHub()).WithSchedules(schedStore, sch)
 	r := gin.New()
 	srv.Mount(r)

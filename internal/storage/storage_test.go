@@ -151,6 +151,9 @@ func Test_Storage_CreateMany_is_atomic_on_save_failure(t *testing.T) {
 	dir := t.TempDir()
 	s := newStorage(t, filepath.Join(dir, "devices.json"))
 	require.NoError(t, s.Create(testDevice("pc1")))
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based failure injection is ignored by root")
+	}
 	require.NoError(t, os.Chmod(dir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
@@ -165,6 +168,70 @@ func Test_Storage_CreateMany_is_atomic_on_save_failure(t *testing.T) {
 	require.ErrorIs(t, err, storage.ErrNotFound)
 	reloaded := newStorage(t, filepath.Join(dir, "devices.json"))
 	require.Len(t, reloaded.GetAll(), 1)
+}
+
+func Test_Storage_DeleteMany_reports_mixed_batch_in_one_write(t *testing.T) {
+	// Given
+	path := filepath.Join(t.TempDir(), "devices.json")
+	s := newStorage(t, path)
+	require.NoError(t, s.Create(testDevice("pc1")))
+	require.NoError(t, s.Create(testDevice("pc2")))
+
+	// When
+	deleted, notFound, err := s.DeleteMany([]string{"pc1", "ghost", "pc1", "pc2"})
+
+	// Then: dupes collapse, unknowns never error, one save persists both.
+	require.NoError(t, err)
+	require.Equal(t, []string{"pc1", "pc2"}, deleted)
+	require.Equal(t, []string{"ghost"}, notFound)
+	require.Empty(t, s.GetAll())
+	reloaded := newStorage(t, path)
+	require.Empty(t, reloaded.GetAll())
+}
+
+func Test_Storage_DeleteMany_rolls_back_memory_when_dir_is_gone(t *testing.T) {
+	// Given: a registry whose directory vanished (save fails for any user,
+	// root included).
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	require.NoError(t, os.Mkdir(sub, 0o700))
+	s := newStorage(t, filepath.Join(sub, "devices.json"))
+	require.NoError(t, s.Create(testDevice("pc1")))
+	require.NoError(t, s.Create(testDevice("pc2")))
+	require.NoError(t, os.RemoveAll(sub))
+
+	// When
+	deleted, notFound, err := s.DeleteMany([]string{"pc1", "pc2"})
+
+	// Then: the error surfaces and the in-memory registry is restored.
+	require.Error(t, err)
+	require.Nil(t, deleted)
+	require.Nil(t, notFound)
+	require.Len(t, s.GetAll(), 2)
+}
+
+func Test_Storage_DeleteMany_is_atomic_on_save_failure(t *testing.T) {
+	// Given
+	dir := t.TempDir()
+	s := newStorage(t, filepath.Join(dir, "devices.json"))
+	require.NoError(t, s.Create(testDevice("pc1")))
+	require.NoError(t, s.Create(testDevice("pc2")))
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based failure injection is ignored by root")
+	}
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	// When
+	deleted, notFound, err := s.DeleteMany([]string{"pc1", "pc2"})
+
+	// Then: memory and disk remain unchanged.
+	require.Error(t, err)
+	require.Nil(t, deleted)
+	require.Nil(t, notFound)
+	require.Len(t, s.GetAll(), 2)
+	reloaded := newStorage(t, filepath.Join(dir, "devices.json"))
+	require.Len(t, reloaded.GetAll(), 2)
 }
 
 func Test_Storage_persists_files_as_private(t *testing.T) {

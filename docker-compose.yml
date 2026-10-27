@@ -10,6 +10,8 @@ services:
       DEVICES_FILE: /data/devices.json
       HISTORY_FILE: /data/wake-history.json
       SCHEDULES_FILE: /data/schedules.json
+      IGNORED_FILE: /data/ignored.json
+      SCAN_FILE: /data/scan.json
     volumes:
       - hello-data:/data
     restart: unless-stopped

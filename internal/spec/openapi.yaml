@@ -1,9 +1,11 @@
 openapi: 3.1.0
 info:
   title: hello
-  version: 1.1.0
-  description: Wake-on-LAN registry with live presence. Send magic packets, track
-    devices, and subscribe to status changes over WebSocket.
+  version: 1.2.0
+  description: Wake-on-LAN registry with live presence (v1.2). Send magic packets
+    (single, batch, scheduled, one-shot), track devices, scan and adopt the LAN,
+    monitor reachability, back up and restore state, and subscribe to status
+    changes over WebSocket.
   license:
     name: MIT
 servers:
@@ -71,6 +73,36 @@ paths:
             text/html:
               schema:
                 type: string
+  /dashboard:
+    get:
+      tags: [System]
+      summary: Device dashboard
+      description: Server-rendered single-page dashboard (plain HTML, no build step).
+        Public like /docs; API calls from the page carry a user-entered Bearer
+        via the Authorization header.
+      operationId: dashboard
+      security: []
+      responses:
+        '200':
+          description: Dashboard HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+  /manifest.json:
+    get:
+      tags: [System]
+      summary: Dashboard web manifest
+      description: Minimal PWA manifest making /dashboard installable (start_url /dashboard).
+      operationId: dashboardManifest
+      security: []
+      responses:
+        '200':
+          description: Web app manifest
+          content:
+            application/manifest+json:
+              schema:
+                type: string
   /ws:
     get:
       tags: [System]
@@ -98,9 +130,23 @@ paths:
       summary: Wake the default device
       description: Canonical endpoint. Sends a magic packet to DEFAULT_MAC.
       operationId: wakeDefault
+      parameters:
+        - $ref: '#/components/parameters/BroadcastIP'
+        - $ref: '#/components/parameters/BroadcastAlias'
+        - $ref: '#/components/parameters/WakeNote'
+        - $ref: '#/components/parameters/DryRun'
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -116,9 +162,23 @@ paths:
       description: Kept for backward compatibility. Prefer POST /wake because GET
         must not trigger side effects.
       operationId: wakeDefaultLegacy
+      parameters:
+        - $ref: '#/components/parameters/BroadcastIP'
+        - $ref: '#/components/parameters/BroadcastAlias'
+        - $ref: '#/components/parameters/WakeNote'
+        - $ref: '#/components/parameters/DryRun'
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -136,9 +196,23 @@ paths:
       description: Canonical endpoint. Prefer over GET for the same reason as
         POST /wake.
       operationId: wakeMAC
+      parameters:
+        - $ref: '#/components/parameters/BroadcastIP'
+        - $ref: '#/components/parameters/BroadcastAlias'
+        - $ref: '#/components/parameters/WakeNote'
+        - $ref: '#/components/parameters/DryRun'
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -155,9 +229,23 @@ paths:
       deprecated: true
       description: Kept for backward compatibility. Prefer POST.
       operationId: wakeMACLegacy
+      parameters:
+        - $ref: '#/components/parameters/BroadcastIP'
+        - $ref: '#/components/parameters/BroadcastAlias'
+        - $ref: '#/components/parameters/WakeNote'
+        - $ref: '#/components/parameters/DryRun'
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -168,21 +256,186 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
+  /wake/all:
+    post:
+      tags: [Wake]
+      summary: Wake every matching device
+      description: >-
+        Same semantics and response shape as POST /devices/wake-batch, driven
+        by query filters. Status and tag combine (AND); no selection means the
+        whole registry. Devices inside their WAKE_COOLDOWN_SEC window land in
+        failed with a cooling-down error. Shares the wake throttle.
+      operationId: wakeAll
+      parameters:
+        - $ref: '#/components/parameters/WakeTag'
+        - $ref: '#/components/parameters/WakeStatus'
+        - $ref: '#/components/parameters/DryRun'
+        - $ref: '#/components/parameters/BroadcastIP'
+        - $ref: '#/components/parameters/BroadcastAlias'
+        - $ref: '#/components/parameters/WakeNote'
+      responses:
+        '200':
+          description: Matched set plus per-device outcome
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dry_run, matched, woken, failed]
+                properties:
+                  dry_run:
+                    type: boolean
+                  matched:
+                    type: array
+                    items:
+                      type: string
+                  woken:
+                    type: array
+                    items:
+                      type: string
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, error]
+                      properties:
+                        id:
+                          type: string
+                        error:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /wake/at:
+    post:
+      tags: [Wake]
+      summary: Schedule a one-shot wake (alias)
+      description: Alias of POST /wake/oneshots with the same body and 201 response. Fire time must be 5s to 24h ahead; shares the wake throttle.
+      operationId: createOneshotAlias
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneshotInput'
+      responses:
+        '201':
+          description: One-shot armed
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Oneshot'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Unknown device, bad time or note, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /devices:
     get:
       tags: [Devices]
       summary: List devices
-      description: Unpaginated. The registry is local and small by design.
+      description: Filtered, sorted and paginated. The envelope always carries the total.
       operationId: listDevices
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DeviceStatus'
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive substring over id, name, MAC and IP
+          schema:
+            type: string
+        - name: tag
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [name, status, last_seen, wake_count]
+            default: name
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
       responses:
         '200':
           description: Current registry snapshot
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceList'
+        '304':
+          description: Registry unchanged, ETag matches If-None-Match
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     post:
       tags: [Devices]
       summary: Register a device
@@ -215,6 +468,275 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Devices]
+      summary: Delete several devices
+      description: Comma-separated ids, at most 50 per request. Unknown ids are reported, not fatal.
+      operationId: bulkDeleteDevices
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema:
+            type: string
+            example: pc-salon,pc-bureau
+      responses:
+        '200':
+          description: Per-id report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, not_found]
+                properties:
+                  deleted:
+                    type: array
+                    items:
+                      type: string
+                  not_found:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /devices/counts:
+    get:
+      tags: [Devices]
+      summary: Registry totals by reachability
+      operationId: deviceCounts
+      responses:
+        '200':
+          description: Cheap polling totals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [total, up, down, unknown]
+                properties:
+                  total:
+                    type: integer
+                  up:
+                    type: integer
+                  down:
+                    type: integer
+                  unknown:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /devices/export:
+    get:
+      tags: [Devices]
+      summary: Download the registry
+      description: Whole registry as a JSON array, served as attachment.
+      operationId: exportDevices
+      responses:
+        '200':
+          description: devices-export.json payload
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /devices/import:
+    post:
+      tags: [Devices]
+      summary: Bulk-load devices
+      description: >-
+        Every entry is validated before anything is written, so a bad batch
+        never leaves a partial registry. At most 200 devices per call. Modes
+        are abort, skip and replace.
+      operationId: importDevices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [devices]
+              properties:
+                devices:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/DeviceInput'
+                mode:
+                  type: string
+                  enum: [abort, skip, replace]
+                  default: abort
+      responses:
+        '201':
+          description: Created entries plus skipped ids
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [created, skipped]
+                properties:
+                  created:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Device'
+                  skipped:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /devices/wake-batch:
+    post:
+      tags: [Devices]
+      summary: Wake several devices at once
+      description: Select by explicit ids, by tag, or both; empty selection means the whole registry. Shares the wake cooldown. dry_run previews the target set without sending. Query params (tag, status, dry_run, note, broadcast_ip) override the body. Devices inside their WAKE_COOLDOWN_SEC window land in failed with a cooling-down error.
+      operationId: wakeBatch
+      parameters:
+        - $ref: '#/components/parameters/WakeTag'
+        - $ref: '#/components/parameters/WakeStatus'
+        - $ref: '#/components/parameters/DryRun'
+        - $ref: '#/components/parameters/BroadcastIP'
+        - $ref: '#/components/parameters/BroadcastAlias'
+        - $ref: '#/components/parameters/WakeNote'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: string
+                tag:
+                  type: string
+                status:
+                  type: string
+                  enum: [up, down, unknown]
+                dry_run:
+                  type: boolean
+                note:
+                  type: string
+                  maxLength: 140
+                broadcast_ip:
+                  type: string
+                  format: ipv4
+                broadcast:
+                  type: string
+                  format: ipv4
+                  description: Alias of broadcast_ip
+      responses:
+        '200':
+          description: Matched set plus per-device outcome
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dry_run, matched, woken, failed]
+                properties:
+                  dry_run:
+                    type: boolean
+                  matched:
+                    type: array
+                    items:
+                      type: string
+                  woken:
+                    type: array
+                    items:
+                      type: string
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, error]
+                      properties:
+                        id:
+                          type: string
+                        error:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /devices/wake:
+    post:
+      tags: [Devices]
+      summary: Wake devices by filter
+      description: >-
+        Same semantics and response shape as POST /devices/wake-batch, driven
+        by query filters. Status and tag combine (AND); no selection means the
+        whole registry. Devices inside their WAKE_COOLDOWN_SEC window land in
+        failed with a cooling-down error. Shares the wake throttle. Static
+        route, never shadowed by /devices/{id}.
+      operationId: wakeDevicesByFilter
+      parameters:
+        - $ref: '#/components/parameters/WakeTag'
+        - $ref: '#/components/parameters/WakeStatus'
+        - $ref: '#/components/parameters/DryRun'
+        - $ref: '#/components/parameters/BroadcastIP'
+        - $ref: '#/components/parameters/BroadcastAlias'
+        - $ref: '#/components/parameters/WakeNote'
+      responses:
+        '200':
+          description: Matched set plus per-device outcome
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dry_run, matched, woken, failed]
+                properties:
+                  dry_run:
+                    type: boolean
+                  matched:
+                    type: array
+                    items:
+                      type: string
+                  woken:
+                    type: array
+                    items:
+                      type: string
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, error]
+                      properties:
+                        id:
+                          type: string
+                        error:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /devices/{id}:
     parameters:
       - $ref: '#/components/parameters/DeviceId'
@@ -258,6 +780,53 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+    patch:
+      tags: [Devices]
+      summary: Patch a device
+      description: JSON merge patch, only the keys present are changed. The id is immutable here.
+      operationId: patchDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name:
+                  type: string
+                mac:
+                  type: string
+                  pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+                ip:
+                  type: string
+                  format: ipv4
+                status:
+                  $ref: '#/components/schemas/DeviceStatus'
+                ping_enabled:
+                  type: boolean
+                notes:
+                  type: string
+                  maxLength: 500
+                tags:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: string
+              additionalProperties: false
+      responses:
+        '200':
+          description: Stored representation after patch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       tags: [Devices]
       summary: Delete a device
@@ -269,17 +838,114 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+  /devices/{id}/clone:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    post:
+      tags: [Devices]
+      summary: Copy a device under a new id
+      description: Counters and reachability reset; identity and network settings are kept.
+      operationId: cloneDevice
+      parameters:
+        - name: new_id
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '201':
+          description: The copy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /devices/{id}/wake:
     parameters:
       - $ref: '#/components/parameters/DeviceId'
     post:
       tags: [Devices]
       summary: Wake a registered device
-      description: Looks the device up by id, then sends a magic packet to its MAC.
+      description: Looks the device up by id, then sends a magic packet to its MAC. With retries>0 the packet is resent until the device answers a ping or retries run out; retries x interval must stay within 8s (server write timeout) and the device needs an IP.
       operationId: wakeDevice
+      parameters:
+        - name: retries
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 5
+            default: 0
+        - name: interval
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5
+            default: 2
+            description: Seconds between retry attempts
+        - name: dry_run
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Validate only (values 1, true, yes); sends nothing, logs nothing
+        - name: broadcast_ip
+          in: query
+          required: false
+          schema:
+            type: string
+            format: ipv4
+          description: Override the computed directed broadcast for this wake (preferred name)
+        - name: broadcast
+          in: query
+          required: false
+          schema:
+            type: string
+            format: ipv4
+          description: Alias of broadcast_ip, kept for backward compatibility
+        - name: note
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 140
+          description: 'Free note stored on the history entry; a JSON body {"note": "..."} works too'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 140
+                  description: Free note stored on the history entry
+              additionalProperties: false
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -288,13 +954,116 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: Retry needs a device IP, or a parameter is out of range
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '500':
           $ref: '#/components/responses/InternalError'
+  /devices/{id}/uptime:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [Monitor]
+      summary: Honest uptime summary for one device
+      description: >-
+        Raw poll counters from the monitor plus the latest recorded change and
+        the monitor start time. Never invented: unpolled devices report zero checks.
+      operationId: deviceUptime
+      responses:
+        '200':
+          description: Per-device poll summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceUptime'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /wake/oneshots:
+    get:
+      tags: [Devices]
+      summary: List pending one-shot wakes
+      description: Ephemeral delayed wakes, soonest first. Lost on restart.
+      operationId: listOneshots
+      responses:
+        '200':
+          description: Pending one-shots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OneshotList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Devices]
+      summary: Schedule a one-shot wake
+      description: Exactly one of device_id or mac, firing once 5s to 24h ahead. Shares the wake throttle. Fires once as a manual wake with the optional note.
+      operationId: createOneshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OneshotInput'
+      responses:
+        '201':
+          description: One-shot armed
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Oneshot'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Unknown device, bad time or note, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /wake/oneshots/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [Devices]
+      summary: Cancel a pending one-shot
+      operationId: deleteOneshot
+      responses:
+        '204':
+          description: Cancelled, no body
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /history:
     get:
       tags: [Devices]
       summary: List recorded wakes
-      description: Newest first. Filter by registry id, cap the page with limit.
+      description: Newest first. Filter by registry id, trigger, success, and time window; cap the page with limit.
       operationId: listHistory
       parameters:
         - name: device_id
@@ -302,6 +1071,53 @@ paths:
           required: false
           schema:
             type: string
+        - name: trigger
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [manual, schedule]
+        - name: success
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: result
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ok, error]
+          description: Alias for success (ok=true, error=false)
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Keep entries at or after this RFC 3339 time
+        - name: before
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Keep entries strictly before this RFC 3339 time
+        - name: until
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Alias for before
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: Oldest-first or newest-first; also applies to /history/export
         - name: limit
           in: query
           required: false
@@ -322,6 +1138,138 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Bad trigger, success, since or before value, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [Devices]
+      summary: Purge old history entries
+      description: Deletes every entry older than the required RFC 3339 before time. There is no undo.
+      operationId: purgeHistory
+      parameters:
+        - name: before
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Purge count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurgeResult'
+        '400':
+          description: Missing before, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Bad before value, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /history/stats:
+    get:
+      tags: [Devices]
+      summary: Wake statistics over retained history
+      description: Totals, success rate, and per-trigger splits computed on the entries currently retained (bounded by HISTORY_CAP).
+      operationId: historyStats
+      responses:
+        '200':
+          description: Statistics snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /history/export:
+    get:
+      tags: [Devices]
+      summary: Export history as CSV
+      description: Downloads the retained entries as a history.csv attachment (id, at, device_id, mac, trigger, success, attempts, note, error), honoring the same filters and order as GET /history.
+      operationId: exportHistory
+      parameters:
+        - name: device_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: trigger
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [manual, schedule]
+        - name: success
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: result
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ok, error]
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: before
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: CSV attachment
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /metrics:
+    get:
+      tags: [Devices]
+      summary: Prometheus metrics
+      description: Wake counters by trigger and result, device and schedule gauges, uptime. Content type text/plain.
+      operationId: metrics
+      responses:
+        '200':
+          description: Prometheus text exposition
+          content:
+            text/plain:
+              schema:
+                type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
   /schedules:
@@ -427,6 +1375,212 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+  /schedules/pause-all:
+    post:
+      tags: [Schedules]
+      summary: Pause every schedule
+      description: Disables all schedules at once and reloads the runner. Idempotent.
+      operationId: pauseSchedules
+      responses:
+        '200':
+          description: Pause report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PauseResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /schedules/resume-all:
+    post:
+      tags: [Schedules]
+      summary: Resume every schedule
+      description: Re-enables all schedules at once and reloads the runner. Idempotent.
+      operationId: resumeSchedules
+      responses:
+        '200':
+          description: Resume report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PauseResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /schedules/enable:
+    post:
+      tags: [Schedules]
+      summary: Enable several schedules
+      description: Comma-separated ids, at most 100 per request. Unknown ids 422 the whole batch (atomic), then the runner reloads once.
+      operationId: enableSchedules
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema:
+            type: string
+            example: morning,evening
+      responses:
+        '200':
+          description: Updated ids
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkScheduleResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /schedules/disable:
+    post:
+      tags: [Schedules]
+      summary: Disable several schedules
+      description: Comma-separated ids, at most 100 per request. Unknown ids 422 the whole batch (atomic), then the runner reloads once.
+      operationId: disableSchedules
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema:
+            type: string
+            example: morning,evening
+      responses:
+        '200':
+          description: Updated ids
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkScheduleResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /schedules/validate:
+    post:
+      tags: [Schedules]
+      summary: Validate a cron expression
+      description: Checks a cron expression and previews its next run without persisting anything.
+      operationId: validateSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CronInput'
+      responses:
+        '200':
+          description: Validation verdict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateResult'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /schedules/{id}/duplicate:
+    post:
+      tags: [Schedules]
+      summary: Duplicate a schedule
+      description: Copies a schedule under a fresh id, dropping one-shot state.
+      operationId: duplicateSchedule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Schedule duplicated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Registry full, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /schedules/{id}/fire:
+    post:
+      tags: [Schedules]
+      summary: Fire a schedule now
+      description: Wakes the schedule target immediately with the schedule trigger.
+      operationId: fireScheduleNow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Immediate wake result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleFireResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unknown target device, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: Magic packet send failed, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /schedules/{id}/history:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Schedules]
+      summary: Recorded wakes fired by one schedule
+      description: History entries carrying this schedule_id, newest first.
+      operationId: scheduleHistory
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        '200':
+          description: Schedule wake log snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeHistory'
+        '400':
+          description: Bad limit, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /discover:
     post:
       tags: [Discovery]
@@ -434,11 +1588,30 @@ paths:
       description: >-
         TCP-probes the local /24 then maps live IPs to MACs via the OS ARP
         table. One scan at a time with a 30s cooldown; concurrent or early
-        rescans get 429 with a Retry-After hint. No root required.
+        rescans get 429 with a Retry-After hint. ?cidr= scans an explicit
+        range instead of the auto-detected subnet; ranges wider than /22 are
+        rejected with 422. The outcome persists to SCAN_FILE across restarts.
+        Ignored addresses are filtered out and counted. No root required.
       operationId: scanNetwork
+      parameters:
+        - name: cidr
+          in: query
+          description: Explicit range to sweep, e.g. 192.168.2.0/24
+          schema:
+            type: string
+            example: 192.168.2.0/24
       responses:
         '200':
           description: Discovered candidates, known flags the registry
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -460,6 +1633,18 @@ paths:
         never creates half a fleet. Names default to the hostname, else
         host-<ip>.
       operationId: adoptHosts
+      parameters:
+        - name: dry_run
+          in: query
+          description: Validate only, persist nothing, answer 200 with a preview
+          schema:
+            type: boolean
+        - name: tags
+          in: query
+          description: Comma-separated tags applied to every created device
+          schema:
+            type: string
+            example: lab,servers
       requestBody:
         required: true
         content:
@@ -467,8 +1652,32 @@ paths:
             schema:
               $ref: '#/components/schemas/AdoptInput'
       responses:
+        '200':
+          description: Dry-run preview, nothing persisted
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdoptPreview'
         '201':
           description: Devices created
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -489,6 +1698,398 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ValidationProblem'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /discover/status:
+    get:
+      tags: [Discovery]
+      summary: Scanner guards and latest scan
+      operationId: discoverStatus
+      responses:
+        '200':
+          description: Live guard state plus latest finished scan outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoverStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /discover/adopt-all:
+    post:
+      tags: [Discovery]
+      summary: Scan then adopt every new candidate
+      description: >-
+        Runs one sweep (same throttle as POST /discover) then adopts every
+        candidate with a MAC that is neither known nor ignored. MAC-less,
+        known, and ignored hosts are skipped and counted.
+      operationId: adoptAll
+      parameters:
+        - name: cidr
+          in: query
+          description: Explicit range to sweep, e.g. 192.168.2.0/24
+          schema:
+            type: string
+            example: 192.168.2.0/24
+      responses:
+        '201':
+          description: Adoption report, devices may be empty when nothing is new
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdoptAllResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Bad candidate data, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ValidationProblem'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /discover/ignore:
+    get:
+      tags: [Discovery]
+      summary: List ignored addresses
+      operationId: listIgnore
+      responses:
+        '200':
+          description: Denylisted MACs and IPs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoreList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Discovery]
+      summary: Ignore one address
+      description: At least one of mac or ip is required. Both are stored when both are given.
+      operationId: addIgnore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IgnoreEntry'
+      responses:
+        '201':
+          description: Ignore entry stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoreResult'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Bad MAC or IP, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [Discovery]
+      summary: Unignore one address
+      operationId: deleteIgnore
+      parameters:
+        - name: mac
+          in: query
+          schema:
+            type: string
+        - name: ip
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Entry removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoreResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Bad MAC or IP, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /discover/ignored:
+    get:
+      tags: [Discovery]
+      summary: List ignored addresses (alias)
+      description: Alias of GET /discover/ignore with identical behavior.
+      operationId: listIgnoredAlias
+      responses:
+        '200':
+          description: Denylisted MACs and IPs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoreList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Discovery]
+      summary: Ignore one address (alias)
+      description: Alias of POST /discover/ignore with identical behavior.
+      operationId: addIgnoredAlias
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IgnoreEntry'
+      responses:
+        '201':
+          description: Ignore entry stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoreResult'
+        '400':
+          description: Bad JSON, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Bad MAC or IP, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      tags: [Discovery]
+      summary: Unignore one address (alias)
+      description: Alias of DELETE /discover/ignore with identical behavior.
+      operationId: deleteIgnoredAlias
+      parameters:
+        - name: mac
+          in: query
+          schema:
+            type: string
+        - name: ip
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Entry removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IgnoreResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Bad MAC or IP, RFC 9457 body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /monitor/check:
+    post:
+      tags: [Monitor]
+      summary: Poll every device now, or one with ?device_id=
+      operationId: checkMonitor
+      parameters:
+        - name: device_id
+          in: query
+          required: false
+          description: Probe only this device; an unknown id returns 404
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Immediate polling pass outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /monitor/transitions:
+    get:
+      tags: [Monitor]
+      summary: Latest reachability changes
+      operationId: monitorTransitions
+      responses:
+        '200':
+          description: Up to 20 transitions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionsResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /monitor/uptime:
+    get:
+      tags: [Monitor]
+      summary: Per-device poll uptime
+      operationId: monitorUptime
+      responses:
+        '200':
+          description: Up/total poll counts since process start
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UptimeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /monitor/flapping:
+    get:
+      tags: [Monitor]
+      summary: Devices flapping now
+      operationId: monitorFlapping
+      responses:
+        '200':
+          description: Devices with 4+ transitions in the trailing 5 minutes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlappingResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /monitor/status:
+    get:
+      tags: [Monitor]
+      summary: Monitor tuning and latest pass
+      operationId: monitorStatus
+      responses:
+        '200':
+          description: Interval, timeout, and latest pass counters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitorStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /version:
+    get:
+      tags: [System]
+      summary: Build version
+      operationId: version
+      responses:
+        '200':
+          description: Version string, dev unless release-built
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Version'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /backup:
+    get:
+      tags: [System]
+      summary: Download a full backup envelope
+      operationId: backup
+      description: >-
+        Devices and schedules are sorted by id and the discovery ignore list
+        is included, so two backups of unchanged state are byte-identical.
+        History is newest-first, bounded by the history retention cap.
+      responses:
+        '200':
+          description: Versioned backup, served as an attachment
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /restore:
+    post:
+      tags: [System]
+      summary: Validate and apply a backup envelope
+      operationId: restore
+      description: >-
+        Restore is all-or-nothing: the whole payload is validated first,
+        then devices, schedules, history and the ignore list are applied in
+        order. Any apply failure rolls the already-applied stores back and
+        reports 500, so the registry is never left half-restored. Each
+        schedule must target a device already in the registry or included in
+        the same payload, otherwise 422. History payloads over the retention
+        cap are rejected with 422, never silently truncated, and restored
+        ids never move the wake-event sequence backwards.
+      parameters:
+        - name: dry_run
+          in: query
+          description: Validate only, 1/true/yes
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreInput'
+      responses:
+        '200':
+          description: Restore counts, or validation counts in dry_run mode
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/RestoreResult'
+                  - $ref: '#/components/schemas/RestoreDryRun'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /config:
+    get:
+      tags: [System]
+      summary: Redacted runtime configuration
+      operationId: runtimeConfig
+      responses:
+        '200':
+          description: Settings with the token never included
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 components:
   parameters:
     MacAddress:
@@ -509,6 +2110,53 @@ components:
         type: string
         minLength: 1
         example: pc-salon
+    BroadcastIP:
+      name: broadcast_ip
+      in: query
+      required: false
+      description: Directed broadcast override for this wake (preferred name)
+      schema:
+        type: string
+        format: ipv4
+    BroadcastAlias:
+      name: broadcast
+      in: query
+      required: false
+      description: Alias of broadcast_ip, kept for backward compatibility
+      schema:
+        type: string
+        format: ipv4
+    WakeNote:
+      name: note
+      in: query
+      required: false
+      description: Free note stored on the history entry, at most 140 characters
+      schema:
+        type: string
+        maxLength: 140
+    DryRun:
+      name: dry_run
+      in: query
+      required: false
+      description: Validate only (values 1, true, yes); sends nothing, logs nothing
+      schema:
+        type: boolean
+        default: false
+    WakeTag:
+      name: tag
+      in: query
+      required: false
+      description: Wake devices carrying this tag
+      schema:
+        type: string
+    WakeStatus:
+      name: status
+      in: query
+      required: false
+      description: Wake only devices in this reachability state
+      schema:
+        type: string
+        enum: [up, down, unknown]
   schemas:
     Device:
       type: object
@@ -537,6 +2185,33 @@ components:
           type: integer
           format: int64
           description: Unix timestamp of the last up observation, 0 if never
+        notes:
+          type: string
+          maxLength: 500
+          description: Free-text note, trimmed on write
+        tags:
+          type: array
+          maxItems: 10
+          description: Lowercase slugs ([a-z0-9_-]), normalized and deduped on write
+          items:
+            type: string
+        wake_count:
+          type: integer
+          minimum: 0
+          description: Successful manual and scheduled wakes since registration
+        last_wake_at:
+          type: integer
+          format: int64
+          description: Unix timestamp of the last successful wake, absent if never
+        monitor_secs:
+          type: integer
+          minimum: 0
+          description: Per-device monitor cadence in seconds, 0 follows the global interval
+        next_run:
+          type: integer
+          format: int64
+          readOnly: true
+          description: Earliest upcoming schedule fire (unix seconds), computed by GET /devices/{id} only and never persisted
       additionalProperties: false
     DeviceInput:
       type: object
@@ -563,18 +2238,37 @@ components:
         last_seen:
           type: integer
           format: int64
+        notes:
+          type: string
+          maxLength: 500
+        tags:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+        monitor_secs:
+          type: integer
+          minimum: 0
+          description: Per-device monitor cadence in seconds, 0 follows the global interval
       additionalProperties: false
     DeviceStatus:
       type: string
       enum: [up, down, unknown]
     DeviceList:
       type: object
-      required: [devices]
+      required: [devices, total, page, per_page]
       properties:
         devices:
           type: array
           items:
             $ref: '#/components/schemas/Device'
+        total:
+          type: integer
+          description: Matches across all pages, before slicing
+        page:
+          type: integer
+        per_page:
+          type: integer
       additionalProperties: false
     WakeEvent:
       type: object
@@ -601,8 +2295,18 @@ components:
           enum: [manual, schedule]
         success:
           type: boolean
+        attempts:
+          type: integer
+          description: Packets sent for this entry (retry-until-up); absent when 1
+        note:
+          type: string
+          description: Free note attached at wake time, at most 140 characters
+          maxLength: 140
         error:
           type: string
+        schedule_id:
+          type: string
+          description: Owning schedule for schedule-triggered wakes, absent for manual ones
       additionalProperties: false
     WakeHistory:
       type: object
@@ -630,6 +2334,25 @@ components:
           example: 0 7 * * 1-5
         enabled:
           type: boolean
+        once:
+          type: boolean
+          description: One-shot schedule, auto-disabled after its first fire
+        once_at:
+          type: integer
+          format: int64
+          description: Unix seconds of the one-shot fire time
+        next_run:
+          type: integer
+          format: int64
+          description: Computed unix seconds of the next fire, serve-time only
+        last_run_at:
+          type: integer
+          format: int64
+          description: Unix seconds of the last fire, absent when never fired
+        last_result:
+          type: string
+          enum: [ok, error]
+          description: Outcome of the last fire, absent when never fired
       additionalProperties: false
     ScheduleInput:
       type: object
@@ -647,6 +2370,11 @@ components:
           minLength: 1
         enabled:
           type: boolean
+        once_at:
+          type: string
+          format: date-time
+          description: RFC 3339 fire time turning creation into a one-shot schedule
+          example: 2026-09-24T07:00:00Z
       additionalProperties: false
     ScheduleList:
       type: object
@@ -656,6 +2384,177 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Schedule'
+      additionalProperties: false
+    Oneshot:
+      type: object
+      description: One delayed wake, in-memory only and lost on restart
+      required: [id, device_id, mac, at]
+      properties:
+        id:
+          type: string
+          example: o-1
+        device_id:
+          type: string
+          example: pc-salon
+        mac:
+          type: string
+          pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+          example: 00:11:22:33:44:55
+        at:
+          type: integer
+          format: int64
+          description: Unix seconds of the planned fire
+        note:
+          type: string
+          maxLength: 140
+        broadcast:
+          type: string
+          format: ipv4
+          description: Directed broadcast used at fire time; computed per device when absent
+      additionalProperties: false
+    OneshotInput:
+      type: object
+      description: Exactly one of device_id or mac, plus an RFC 3339 time 5s to 24h ahead
+      required: [at]
+      properties:
+        device_id:
+          type: string
+          minLength: 1
+        mac:
+          type: string
+          pattern: '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
+        at:
+          type: string
+          format: date-time
+          example: 2026-09-24T07:00:00Z
+        note:
+          type: string
+          maxLength: 140
+        broadcast_ip:
+          type: string
+          format: ipv4
+          description: Directed broadcast override used at fire time
+        broadcast:
+          type: string
+          format: ipv4
+          description: Alias of broadcast_ip
+      additionalProperties: false
+    OneshotList:
+      type: object
+      required: [oneshots]
+      properties:
+        oneshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Oneshot'
+      additionalProperties: false
+    HistoryStats:
+      type: object
+      required: [total, ok, error, success_rate, by_trigger, top_devices]
+      properties:
+        total:
+          type: integer
+        ok:
+          type: integer
+        error:
+          type: integer
+        success_rate:
+          type: number
+          description: ok over total, 0 when empty, rounded to 4 decimals
+        by_trigger:
+          type: object
+          properties:
+            manual:
+              type: object
+              properties:
+                ok:
+                  type: integer
+                error:
+                  type: integer
+            schedule:
+              type: object
+              properties:
+                ok:
+                  type: integer
+                error:
+                  type: integer
+        top_devices:
+          type: array
+          maxItems: 5
+          description: Up to 5 devices ranked by summed attempts desc, then device_id asc
+          items:
+            type: object
+            required: [device_id, count, ok, error]
+            properties:
+              device_id:
+                type: string
+              count:
+                type: integer
+                description: Retained entries for the device
+              ok:
+                type: integer
+              error:
+                type: integer
+            additionalProperties: false
+      additionalProperties: false
+    BulkScheduleResult:
+      type: object
+      required: [updated]
+      properties:
+        updated:
+          type: array
+          items:
+            type: string
+          description: Schedule ids flipped by the bulk switch
+      additionalProperties: false
+    PurgeResult:
+      type: object
+      required: [purged]
+      properties:
+        purged:
+          type: integer
+          description: Entries older than before that were removed
+      additionalProperties: false
+    PauseResult:
+      type: object
+      required: [changed]
+      properties:
+        changed:
+          type: integer
+          description: Schedules actually flipped by the bulk switch
+      additionalProperties: false
+    CronInput:
+      type: object
+      required: [cron]
+      properties:
+        cron:
+          type: string
+          minLength: 1
+          example: 0 7 * * 1-5
+      additionalProperties: false
+    ValidateResult:
+      type: object
+      required: [valid]
+      properties:
+        valid:
+          type: boolean
+        next_run:
+          type: integer
+          format: int64
+          description: Next fire when valid, absent otherwise
+      additionalProperties: false
+    ScheduleFireResult:
+      type: object
+      required: [message, schedule_id, device_id, success]
+      properties:
+        message:
+          type: string
+        schedule_id:
+          type: string
+        device_id:
+          type: string
+        success:
+          type: boolean
       additionalProperties: false
     Host:
       type: object
@@ -679,12 +2578,335 @@ components:
       additionalProperties: false
     DiscoverResult:
       type: object
-      required: [hosts]
+      required: [hosts, ignored]
       properties:
         hosts:
           type: array
           items:
             $ref: '#/components/schemas/Host'
+        ignored:
+          type: integer
+          description: Hosts filtered out by the ignore list
+      additionalProperties: false
+    DiscoverStatus:
+      type: object
+      required: [scanning, retry_in_s, last_scan_at, last_hosts]
+      properties:
+        scanning:
+          type: boolean
+        retry_in_s:
+          type: integer
+          description: Seconds before another scan is accepted, 0 when idle
+        last_scan_at:
+          type: integer
+          format: int64
+          description: Unix timestamp of the latest finished scan, 0 if none
+        last_hosts:
+          type: integer
+        last_cidr:
+          type: string
+          description: CIDR of the latest finished scan, persisted across restarts
+        last_error:
+          type: string
+      additionalProperties: false
+    AdoptPreview:
+      type: object
+      required: [devices, dry_run]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+        dry_run:
+          type: boolean
+          enum: [true]
+      additionalProperties: false
+    AdoptAllResult:
+      type: object
+      required: [devices, scanned, skipped, ignored]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+        scanned:
+          type: integer
+          description: Hosts seen by the sweep
+        skipped:
+          type: integer
+          description: MAC-less or already known hosts left alone
+        ignored:
+          type: integer
+          description: Hosts filtered out by the ignore list
+      additionalProperties: false
+    IgnoreEntry:
+      type: object
+      description: At least one of mac or ip is required
+      properties:
+        mac:
+          type: string
+          example: 11:22:33:44:55:66
+        ip:
+          type: string
+          format: ipv4
+          example: 192.168.1.99
+      additionalProperties: false
+    IgnoreList:
+      type: object
+      required: [ignored]
+      properties:
+        ignored:
+          type: array
+          items:
+            $ref: '#/components/schemas/IgnoreEntry'
+      additionalProperties: false
+    IgnoreResult:
+      type: object
+      properties:
+        ignored:
+          $ref: '#/components/schemas/IgnoreEntry'
+        created:
+          type: boolean
+        removed:
+          type: boolean
+      additionalProperties: false
+    CheckResult:
+      type: object
+      required: [checked, changed]
+      properties:
+        checked:
+          type: integer
+        changed:
+          type: integer
+        device_id:
+          type: string
+          description: Present when the check targeted one device
+      additionalProperties: false
+    Transition:
+      type: object
+      required: [device_id, from, to, at]
+      properties:
+        device_id:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        at:
+          type: integer
+          format: int64
+      additionalProperties: false
+    TransitionsResult:
+      type: object
+      required: [transitions]
+      properties:
+        transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transition'
+      additionalProperties: false
+    UptimeEntry:
+      type: object
+      required: [device_id, up, total, percent]
+      properties:
+        device_id:
+          type: string
+        up:
+          type: integer
+        total:
+          type: integer
+        percent:
+          type: number
+          description: 100 * up / total
+      additionalProperties: false
+    UptimeResult:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/UptimeEntry'
+      additionalProperties: false
+    DeviceUptime:
+      type: object
+      description: Honest per-device poll summary; counters come from the monitor, never invented
+      required: [device_id, checks, up, down, percent, last_change, since]
+      properties:
+        device_id:
+          type: string
+        checks:
+          type: integer
+          description: Polls performed for this device since monitor start
+        up:
+          type: integer
+        down:
+          type: integer
+        percent:
+          type: number
+          description: 100 * up / checks, 0 when never polled
+        last_change:
+          type: integer
+          format: int64
+          description: Unix timestamp of the latest recorded transition, 0 if none
+        since:
+          type: integer
+          format: int64
+          description: Unix timestamp of the monitor start
+      additionalProperties: false
+    FlappingResult:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    MonitorStatus:
+      type: object
+      required: [interval_seconds, timeout_seconds, last_run, last_checked, last_changed]
+      properties:
+        interval_seconds:
+          type: integer
+        timeout_seconds:
+          type: integer
+        last_run:
+          type: integer
+          format: int64
+          description: Unix timestamp of the latest pass, 0 if none
+        last_checked:
+          type: integer
+        last_changed:
+          type: integer
+      additionalProperties: false
+    BackupEnvelope:
+      type: object
+      required: [version, devices, history, schedules]
+      properties:
+        version:
+          type: integer
+          example: 1
+        devices:
+          type: array
+          description: Registry snapshot, sorted by id
+          items:
+            $ref: '#/components/schemas/Device'
+        history:
+          type: array
+          description: Wake log newest-first, bounded by the history retention cap
+          items:
+            $ref: '#/components/schemas/WakeEvent'
+        schedules:
+          type: array
+          description: Schedules sorted by id
+          items:
+            $ref: '#/components/schemas/Schedule'
+        ignore:
+          type: array
+          description: Persisted discovery ignore list (MACs then IPs, sorted)
+          items:
+            $ref: '#/components/schemas/IgnoreEntry'
+    RestoreInput:
+      type: object
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+        history:
+          type: array
+          description: Must fit the history retention cap, never truncated
+          items:
+            $ref: '#/components/schemas/WakeEvent'
+        schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Schedule'
+        ignore:
+          type: array
+          items:
+            $ref: '#/components/schemas/IgnoreEntry'
+    RestoreDryRun:
+      type: object
+      required: [dry_run, valid, counts]
+      properties:
+        dry_run:
+          type: boolean
+          example: true
+        valid:
+          type: boolean
+          example: true
+        counts:
+          type: object
+          properties:
+            devices:
+              type: integer
+            schedules:
+              type: integer
+            history:
+              type: integer
+            ignore:
+              type: integer
+    RestoreResult:
+      type: object
+      required: [restored]
+      properties:
+        restored:
+          type: object
+          description: Per-store applied counts for the stores present in the payload
+          properties:
+            devices:
+              type: integer
+            schedules:
+              type: integer
+            history:
+              type: integer
+            ignore:
+              type: integer
+    RuntimeConfig:
+      type: object
+      required: [port, broadcast_ip, monitor_interval_sec, history_cap, schedules_cap, wake_cooldown_sec, trusted_proxies, cors_origins, token_from_file, webhooks, version]
+      properties:
+        port:
+          type: string
+        broadcast_ip:
+          type: string
+        monitor_interval_sec:
+          type: integer
+        history_cap:
+          type: integer
+        schedules_cap:
+          type: integer
+        wake_cooldown_sec:
+          type: integer
+        trusted_proxies:
+          type: string
+        cors_origins:
+          type: string
+        token_from_file:
+          type: boolean
+        webhooks:
+          type: object
+          description: >-
+            Presence flags only, never URLs. Webhook targets are
+            operator-controlled and must be trusted: the server POSTs JSON
+            event payloads to them (SSRF surface).
+          required: [status, wake]
+          properties:
+            status:
+              type: boolean
+            wake:
+              type: boolean
+        version:
+          type: string
+    Version:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: string
+          example: v1.2.0
       additionalProperties: false
     AdoptInput:
       type: object
@@ -723,11 +2945,38 @@ components:
       additionalProperties: false
     Health:
       type: object
-      required: [status]
+      required: [status, version, uptime_seconds, devices, schedules, history_size]
       properties:
         status:
           type: string
           enum: [ok]
+        version:
+          type: string
+          example: dev
+        uptime_seconds:
+          type: integer
+        devices:
+          type: object
+          required: [total, up, down, unknown]
+          properties:
+            total:
+              type: integer
+            up:
+              type: integer
+            down:
+              type: integer
+            unknown:
+              type: integer
+        schedules:
+          type: object
+          required: [total, enabled]
+          properties:
+            total:
+              type: integer
+            enabled:
+              type: integer
+        history_size:
+          type: integer
       additionalProperties: false
     WakeResult:
       type: object
@@ -736,6 +2985,14 @@ components:
         message:
           type: string
           example: magic packet sent to AA:BB:CC:DD:EE:FF !
+        attempts:
+          type: integer
+          description: Packets sent; only present on retry-until-up wakes
+          example: 3
+        up:
+          type: boolean
+          description: Whether the device answered a ping; only present on retry-until-up wakes
+          example: true
       additionalProperties: false
     StatusChange:
       type: object
@@ -811,6 +3068,45 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Throttled wake, adopt or scan; Retry-After seconds in the header, RFC 9457 body
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  headers:
+    X-Request-ID:
+      description: Echoed valid request id, minted otherwise; present on every response
+      schema:
+        type: string
+    ETag:
+      description: Content hash of the response body; send back as If-None-Match for 304
+      schema:
+        type: string
+    X-RateLimit-Limit:
+      description: Request budget per cooldown window
+      schema:
+        type: integer
+    X-RateLimit-Remaining:
+      description: Requests left in the window, 0 on 429
+      schema:
+        type: integer
+    X-RateLimit-Reset:
+      description: Unix timestamp when the window resets
+      schema:
+        type: integer
+        format: int64
   securitySchemes:
     bearerAuth:
       type: http
