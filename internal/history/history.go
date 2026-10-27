@@ -2,9 +2,12 @@ package history
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,10 @@ import (
 
 // defaultCapacity bounds the ring buffer and the persisted file.
 const defaultCapacity = 200
+
+// ErrTooMany is returned when a restore payload holds more entries than the
+// retention bound. Restore refuses instead of silently truncating.
+var ErrTooMany = errors.New("history: retention quota reached")
 
 // History is an append-only, size-bounded log of sent magic packets,
 // persisted to disk and safe for concurrent use. Newest entries come first.
@@ -133,6 +140,76 @@ func (h *History) Stats() Stats {
 		StartedAt:   h.startedAt,
 		Size:        len(h.entries),
 	}
+}
+
+// ValidateEvents checks restore candidates without persisting anything,
+// so restore dry-runs enforce the exact same rules.
+func ValidateEvents(entries []models.WakeEvent) error {
+	for i := range entries {
+		if err := entries[i].Validate(); err != nil {
+			return fmt.Errorf("history: restore index %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// Cap returns the retention bound restores are validated against.
+func (h *History) Cap() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.capacity
+}
+
+// maxSeqOf returns the highest sequence number carried by entry ids of the
+// form h-<nanos>-<seq>. Ids that do not parse are ignored.
+func maxSeqOf(entries []models.WakeEvent) uint64 {
+	var max uint64
+	for _, e := range entries {
+		parts := strings.Split(e.ID, "-")
+		if len(parts) < 3 {
+			continue
+		}
+		n, err := strconv.ParseUint(parts[len(parts)-1], 10, 64)
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max
+}
+
+// Restore replaces the log with previously exported entries, keeping their
+// ids and timestamps. Payloads over capacity are rejected, never truncated.
+// The sequence counter only moves forward, so ids minted after a restore
+// never collide with restored ones. Session counters are statistics, not
+// log state, and are left untouched. On persistence failure memory is
+// rolled back.
+func (h *History) Restore(entries []models.WakeEvent) error {
+	if err := ValidateEvents(entries); err != nil {
+		return err
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if len(entries) > h.capacity {
+		return fmt.Errorf("%w: at most %d entries", ErrTooMany, h.capacity)
+	}
+	previous := append([]models.WakeEvent(nil), h.entries...)
+	previousSeq := h.seq
+	fresh := append([]models.WakeEvent(nil), entries...)
+	h.entries = fresh
+	if peak := maxSeqOf(fresh); peak > h.seq {
+		h.seq = peak
+	}
+	if err := h.save(); err != nil {
+		h.entries = previous
+		h.seq = previousSeq
+		return err
+	}
+	return nil
 }
 
 // List returns stored entries newest-first, optionally filtered by device.

@@ -23,6 +23,12 @@ type Config struct {
 	MonitorInterval time.Duration
 	// APIToken locks the API behind case-sensitive Bearer auth.
 	APIToken string
+	// APITokenFile optionally supplies the token from a file (Docker secrets).
+	APITokenFile string
+	// StatusWebhookURL receives reachability changes; blank disables it.
+	StatusWebhookURL string
+	// WakeWebhookURL receives wake attempt reports; blank disables it.
+	WakeWebhookURL string
 	// HistoryFile persists the wake log.
 	HistoryFile string
 	// SchedulesFile persists wake schedules.
@@ -86,18 +92,21 @@ func LoadConfig() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		DefaultMAC:      os.Getenv("DEFAULT_MAC"),
-		Port:            envOr("PORT", defaultPort),
-		BroadcastIP:     envOr("BROADCAST_IP", defaultBroadcastIP),
-		DevicesFile:     envOr("DEVICES_FILE", defaultDevicesFile),
-		MonitorInterval: monitorInterval(),
-		APIToken:        os.Getenv("API_TOKEN"),
-		HistoryFile:     envOr("HISTORY_FILE", defaultHistoryFile),
-		SchedulesFile:   envOr("SCHEDULES_FILE", defaultSchedulesFile),
-		HistoryCap:      boundedInt("HISTORY_CAP", defaultHistoryCap, 10, maxHistoryCap),
-		SchedulesCap:    boundedInt("SCHEDULES_CAP", defaultSchedulesCap, 1, maxSchedulesCap),
-		WakeCooldownSec: boundedInt("WAKE_COOLDOWN_SEC", 0, 0, maxWakeCooldownSec),
-		IgnoredFile:     envOr("IGNORED_FILE", defaultIgnoredFile),
+		DefaultMAC:       os.Getenv("DEFAULT_MAC"),
+		Port:             envOr("PORT", defaultPort),
+		BroadcastIP:      envOr("BROADCAST_IP", defaultBroadcastIP),
+		DevicesFile:      envOr("DEVICES_FILE", defaultDevicesFile),
+		MonitorInterval:  monitorInterval(),
+		APIToken:         os.Getenv("API_TOKEN"),
+		APITokenFile:     os.Getenv("API_TOKEN_FILE"),
+		StatusWebhookURL: strings.TrimSpace(os.Getenv("STATUS_WEBHOOK_URL")),
+		WakeWebhookURL:   strings.TrimSpace(os.Getenv("WAKE_WEBHOOK_URL")),
+		HistoryFile:      envOr("HISTORY_FILE", defaultHistoryFile),
+		SchedulesFile:    envOr("SCHEDULES_FILE", defaultSchedulesFile),
+		HistoryCap:       boundedInt("HISTORY_CAP", defaultHistoryCap, 10, maxHistoryCap),
+		SchedulesCap:     boundedInt("SCHEDULES_CAP", defaultSchedulesCap, 1, maxSchedulesCap),
+		WakeCooldownSec:  boundedInt("WAKE_COOLDOWN_SEC", 0, 0, maxWakeCooldownSec),
+		IgnoredFile:      envOr("IGNORED_FILE", defaultIgnoredFile),
 		// Auto-scan needs a sane floor: below a minute it falls back to off.
 		DiscoverIntervalSec: discoverIntervalSec(),
 		DiscoverCooldownSec: boundedInt("DISCOVER_COOLDOWN_SEC", defaultDiscoverCooldown, 5, maxDiscoverCooldown),
@@ -116,6 +125,13 @@ func LoadConfig() (*Config, error) {
 	if _, err := net.ParseMAC(cfg.DefaultMAC); err != nil {
 		return nil, fmt.Errorf("config: invalid DEFAULT_MAC %q", cfg.DefaultMAC)
 	}
+	if cfg.APIToken == "" && cfg.APITokenFile != "" {
+		raw, err := os.ReadFile(cfg.APITokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("config: read API_TOKEN_FILE: %w", err)
+		}
+		cfg.APIToken = strings.TrimSpace(string(raw))
+	}
 	if cfg.APIToken == "" {
 		return nil, fmt.Errorf("config: API_TOKEN is required")
 	}
@@ -130,6 +146,12 @@ func LoadConfig() (*Config, error) {
 	}
 	if _, err := cfg.ParseCORSOrigins(); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
+	}
+	if err := validateWebhookURL("STATUS_WEBHOOK_URL", cfg.StatusWebhookURL); err != nil {
+		return nil, err
+	}
+	if err := validateWebhookURL("WAKE_WEBHOOK_URL", cfg.WakeWebhookURL); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }
@@ -283,6 +305,19 @@ func (c *Config) ParseCORSOrigins() ([]string, error) {
 		origins = append(origins, origin)
 	}
 	return origins, nil
+}
+
+// validateWebhookURL accepts a blank value (disabled) or a strict
+// http(s) URL without credentials.
+func validateWebhookURL(name, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return fmt.Errorf("config: %s must be an http(s) URL, got %q", name, raw)
+	}
+	return nil
 }
 
 func splitList(raw string) []string {

@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/cleeryy/hello/internal/models"
+	"github.com/cleeryy/hello/internal/notify"
 	"github.com/cleeryy/hello/internal/ping"
 	"github.com/cleeryy/hello/internal/wol"
 )
@@ -280,4 +281,12 @@ func (s *Server) recordWake(mac string, success bool, errMsg string, attempts in
 	if _, err := s.hist.Record(entry); err != nil {
 		slog.Warn("history record failed", slog.Any("err", err))
 	}
+	// Webhooks report the attempt, never the logging outcome.
+	s.wakeNotify.Send(notify.WakePayload{
+		DeviceID: entry.DeviceID,
+		MAC:      mac,
+		Success:  success,
+		Attempts: attempts,
+		Trigger:  string(models.TriggerManual),
+	})
 }

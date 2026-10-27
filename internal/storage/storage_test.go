@@ -151,6 +151,9 @@ func Test_Storage_CreateMany_is_atomic_on_save_failure(t *testing.T) {
 	dir := t.TempDir()
 	s := newStorage(t, filepath.Join(dir, "devices.json"))
 	require.NoError(t, s.Create(testDevice("pc1")))
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based failure injection is ignored by root")
+	}
 	require.NoError(t, os.Chmod(dir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 

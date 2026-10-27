@@ -116,11 +116,19 @@ func (s *Server) discoverStatus(c *gin.Context) {
 // adoptHosts imports discovery candidates as registry devices. Validation and
 // duplicate checks happen before one locked, atomic registry write.
 func (s *Server) adoptHosts(c *gin.Context) {
-	if s.adoptLimit != nil && !s.adoptLimit.allow(c.ClientIP()) {
-		c.Header("Retry-After", fmt.Sprint(s.adoptLimit.retryAfter(c.ClientIP())))
-		writeProblem(c, http.StatusTooManyRequests, "too many requests",
-			"adopt rate limit exceeded, retry later", nil)
-		return
+	if s.adoptLimit != nil {
+		key := c.ClientIP()
+		c.Header("X-RateLimit-Limit", fmt.Sprint(s.adoptLimit.limit))
+		if !s.adoptLimit.allow(key) {
+			c.Header("Retry-After", fmt.Sprint(s.adoptLimit.retryAfter(key)))
+			c.Header("X-RateLimit-Remaining", "0")
+			c.Header("X-RateLimit-Reset", fmt.Sprint(s.adoptLimit.resetsAt(key).Unix()))
+			writeProblem(c, http.StatusTooManyRequests, "too many requests",
+				"adopt rate limit exceeded, retry later", nil)
+			return
+		}
+		c.Header("X-RateLimit-Remaining", fmt.Sprint(s.adoptLimit.remaining(key)))
+		c.Header("X-RateLimit-Reset", fmt.Sprint(s.adoptLimit.resetsAt(key).Unix()))
 	}
 	var in struct {
 		Hosts []struct {

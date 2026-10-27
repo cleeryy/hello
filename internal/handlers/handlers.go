@@ -14,6 +14,7 @@ import (
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
 	"github.com/cleeryy/hello/internal/monitor"
+	"github.com/cleeryy/hello/internal/notify"
 	"github.com/cleeryy/hello/internal/ping"
 	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/storage"
@@ -35,6 +36,16 @@ type Server struct {
 	sendWOL    func(mac, broadcast string) error
 	limiter    *requestLimiter
 	adoptLimit *rateLimiter
+	// statusNotify and wakeNotify post webhook events; nil means disabled.
+	statusNotify *notify.Sender
+	wakeNotify   *notify.Sender
+	// Restore apply seams. Nil means "call the wired store": tests set
+	// these to force a mid-restore failure and assert all-or-nothing
+	// rollback without touching the filesystem.
+	applyDevices   func([]*models.Device) ([]*models.Device, error)
+	applySchedules func([]models.Schedule) ([]models.Schedule, error)
+	applyHistory   func([]models.WakeEvent) error
+	applyIgnore    func([]discover.Entry) error
 	// pingHost checks reachability for retry-until-up; stubbed in tests.
 	pingHost func(ip string, timeout time.Duration) bool
 	started  time.Time
@@ -71,6 +82,13 @@ func (s *Server) WithSchedules(store *scheduler.Store, sched *scheduler.Schedule
 	return s
 }
 
+// WithNotify wires webhook senders; nil senders stay disabled.
+func (s *Server) WithNotify(status, wake *notify.Sender) *Server {
+	s.statusNotify = status
+	s.wakeNotify = wake
+	return s
+}
+
 // WithDiscover wires the LAN scanner; without it the discover routes stay
 // unregistered and onboarding stays manual.
 func (s *Server) WithDiscover(d *discover.Scanner) *Server {
@@ -83,6 +101,20 @@ func (s *Server) WithDiscover(d *discover.Scanner) *Server {
 func (s *Server) WithIgnoreList(il *discover.IgnoreList) *Server {
 	s.ignore = il
 	return s
+}
+
+// NotifyStatus fans a reachability change out to the realtime hub and the
+// status webhook. Main wires it as the monitor callback so the status
+// sender is exercised through the Server and stays testable.
+func (s *Server) NotifyStatus(dev models.Device) {
+	if s.hub != nil {
+		s.hub.Broadcast(dev)
+	}
+	s.statusNotify.Send(notify.StatusPayload{
+		DeviceID: dev.ID,
+		Status:   string(dev.Status),
+		At:       time.Now().Unix(),
+	})
 }
 
 // WithMonitor wires the reachability monitor; without it the monitor routes
@@ -100,7 +132,7 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, store *storage.Storage, h
 // Mount registers every route. Docs, welcome, and health stay public;
 // everything else requires the API token when one is configured.
 func (s *Server) Mount(r *gin.Engine) {
-	r.Use(gin.Recovery(), securityHeaders(), requestBodyLimit())
+	r.Use(gin.Recovery(), securityHeaders(), requestBodyLimit(), requestID())
 	if origins, err := s.cfg.ParseCORSOrigins(); err == nil {
 		r.Use(corsMiddleware(origins))
 	}
@@ -139,6 +171,9 @@ func (s *Server) Mount(r *gin.Engine) {
 	guarded.GET("/history/export", s.exportHistory)
 	guarded.DELETE("/history", s.purgeHistory)
 	guarded.GET("/metrics", s.metrics)
+	guarded.GET("/backup", s.backup)
+	guarded.POST("/restore", s.restore)
+	guarded.GET("/config", s.runtimeConfig)
 	guarded.GET("/wake/oneshots", s.listOneshots)
 	guarded.DELETE("/wake/oneshots/:id", s.cancelOneshot)
 	if s.schedStore != nil {

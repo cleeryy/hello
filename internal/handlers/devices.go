@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -117,12 +120,27 @@ func (s *Server) listDevices(c *gin.Context) {
 	if end > total {
 		end = total
 	}
-	c.JSON(http.StatusOK, gin.H{
+	body := gin.H{
 		"devices":  devices[start:end],
 		"total":    total,
 		"page":     page,
 		"per_page": perPage,
-	})
+	}
+	// The page bytes are deterministic: same filters always sort the same
+	// way, so the ETag is a stable content hash clients can cache on.
+	raw, err := json.Marshal(body)
+	if err != nil {
+		writeErr(c, err)
+		return
+	}
+	sum := sha256.Sum256(raw)
+	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	c.Header("ETag", etag)
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 // parsePageParams validates ?page= (from 1) and ?per_page= (1..500, default 100).

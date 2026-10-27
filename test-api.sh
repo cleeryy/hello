@@ -118,4 +118,35 @@ if [ "$code" != "422" ]; then
 fi
 echo "rejected (422)"
 
+echo "17. Version carries the request id"
+curl -sf "${AUTH[@]}" -D - "$API/version" -o /tmp/hello-version.json | grep -i "X-Request-ID"
+cat /tmp/hello-version.json | jq .
+
+echo "18. Backup, validate restore dry-run, then restore"
+curl -sf "${AUTH[@]}" "$API/backup" -o /tmp/hello-backup.json
+jq -e '.version == 1 and (.devices | type == "array")' /tmp/hello-backup.json > /dev/null
+curl -sf "${AUTH[@]}" -X POST "$API/restore?dry_run=1" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/hello-backup.json | jq .
+curl -sf "${AUTH[@]}" -X POST "$API/restore" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/hello-backup.json | jq .
+
+echo "19. Redacted runtime config (no token)"
+CONFIG_BODY=$(curl -sf "${AUTH[@]}" "$API/config")
+echo "$CONFIG_BODY" | jq .
+if echo "$CONFIG_BODY" | jq -e '[keys[] | select(test("(?i)token") and . != "token_from_file")] | length == 0' > /dev/null; then
+  echo "no api_token/token value key in /config"
+else
+  echo "token value key leaked in /config"
+  exit 1
+fi
+if echo "$CONFIG_BODY" | grep -qF "$API_TOKEN"; then
+  echo "token value leaked in /config"
+  exit 1
+fi
+
+echo "20. Doctor passes on this environment"
+API_TOKEN="$API_TOKEN" DEFAULT_MAC="$DEFAULT_MAC" go run ./cmd/api doctor
+
 echo "Tests done"

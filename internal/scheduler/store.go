@@ -92,6 +92,64 @@ func (s *Store) Get(id string) (models.Schedule, error) {
 	return item, nil
 }
 
+// ValidateSchedules normalizes and checks a full replacement batch without
+// persisting anything, so restore dry-runs enforce the exact same rules.
+func ValidateSchedules(list []models.Schedule, cap int) ([]models.Schedule, error) {
+	prepared := make([]models.Schedule, 0, len(list))
+	seen := make(map[string]struct{}, len(list))
+	for i := range list {
+		item := list[i]
+		item.Normalize()
+		item.NextRun = 0
+		if err := item.Validate(); err != nil {
+			return nil, fmt.Errorf("scheduler: replace index %d: %w", i, err)
+		}
+		if _, dup := seen[item.ID]; dup {
+			return nil, fmt.Errorf("scheduler: replace: duplicate schedule id %q", item.ID)
+		}
+		seen[item.ID] = struct{}{}
+		prepared = append(prepared, item)
+	}
+	if len(prepared) > cap {
+		return nil, fmt.Errorf("%w: at most %d schedules", ErrTooMany, cap)
+	}
+	return prepared, nil
+}
+
+// ReplaceAll validates a full schedule replacement, then performs one locked
+// write. On persistence failure the in-memory store is restored to its prior
+// state, so callers can treat restore as all-or-nothing.
+func (s *Store) ReplaceAll(list []models.Schedule) ([]models.Schedule, error) {
+	prepared, err := ValidateSchedules(list, s.cap)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous := make(map[string]models.Schedule, len(s.items))
+	for id, item := range s.items {
+		previous[id] = item
+	}
+	fresh := make(map[string]models.Schedule, len(prepared))
+	for _, item := range prepared {
+		fresh[item.ID] = item
+	}
+	s.items = fresh
+	if err := s.saveLocked(); err != nil {
+		s.items = previous
+		return nil, err
+	}
+	return prepared, nil
+}
+
+// Cap returns the maximum number of schedules the store accepts.
+func (s *Store) Cap() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cap
+}
+
 // Create validates, enables and persists a new schedule.
 func (s *Store) Create(in models.Schedule) (models.Schedule, error) {
 	in.Normalize()
