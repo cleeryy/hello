@@ -42,14 +42,10 @@ func (s *Server) bulkDeleteDevices(c *gin.Context) {
 			fmt.Sprintf("at most %d ids per request, got %d", maxBulkDelete, len(ids)), nil)
 		return
 	}
-	deleted := []string{}
-	notFound := []string{}
-	for _, id := range ids {
-		if err := s.store.Delete(id); err != nil {
-			notFound = append(notFound, id)
-			continue
-		}
-		deleted = append(deleted, id)
+	deleted, notFound, err := s.store.DeleteMany(ids)
+	if err != nil {
+		writeErr(c, err)
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"deleted": deleted, "not_found": notFound})
 }

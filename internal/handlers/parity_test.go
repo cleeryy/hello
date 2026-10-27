@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/cleeryy/hello/internal/config"
 	"github.com/cleeryy/hello/internal/discover"
 	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
@@ -77,6 +78,65 @@ func decodeBatch(t *testing.T, w *httptest.ResponseRecorder) batchReport {
 	var rep batchReport
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &rep))
 	return rep
+}
+
+// Given: three registered devices
+// When: DELETE /devices mixes known and unknown ids
+// Then: one write deletes the known pair and reports the ghost.
+func TestParity_bulkDeleteAtomic(t *testing.T) {
+	s, _ := newParityServer(t)
+	seedParityDevices(t, s)
+
+	w := doRequest(s, http.MethodDelete, "/devices?ids=pc1,ghost,pc2", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var report struct {
+		Deleted  []string `json:"deleted"`
+		NotFound []string `json:"not_found"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &report))
+	require.Equal(t, []string{"pc1", "pc2"}, report.Deleted)
+	require.Equal(t, []string{"ghost"}, report.NotFound)
+	require.Len(t, s.store.GetAll(), 1)
+}
+
+// Given: a registry whose file can no longer be rewritten
+// When: DELETE /devices runs
+// Then: 500 problem+json and the registry is untouched (all-or-nothing).
+func TestParity_bulkDeleteNoWriteOnError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based failure injection is ignored by root")
+	}
+	dir := t.TempDir()
+	store := newStorage(t, filepath.Join(dir, "devices.json"))
+	s := New(&config.Config{}, store, nil)
+	s.sendWOL = func(mac, broadcast string) error { return nil }
+	seedParityDevices(t, s)
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	w := doRequest(s, http.MethodDelete, "/devices?ids=pc1,pc2", nil)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Contains(t, w.Header().Get("Content-Type"), "application/problem+json")
+	require.Len(t, s.store.GetAll(), 3)
+}
+
+// Given: a registry whose directory vanished (root-safe save failure)
+// When: DELETE /devices runs
+// Then: 500 and the in-memory registry is untouched.
+func TestParity_bulkDeleteRollbackRootSafe(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	require.NoError(t, os.Mkdir(sub, 0o700))
+	store := newStorage(t, filepath.Join(sub, "devices.json"))
+	s := New(&config.Config{}, store, nil)
+	s.sendWOL = func(mac, broadcast string) error { return nil }
+	seedParityDevices(t, s)
+	require.NoError(t, os.RemoveAll(sub))
+
+	w := doRequest(s, http.MethodDelete, "/devices?ids=pc1,pc2", nil)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Contains(t, w.Header().Get("Content-Type"), "application/problem+json")
+	require.Len(t, s.store.GetAll(), 3)
 }
 
 // Given: three registered devices
