@@ -1,9 +1,11 @@
 openapi: 3.1.0
 info:
   title: hello
-  version: 1.1.0
-  description: Wake-on-LAN registry with live presence. Send magic packets, track
-    devices, and subscribe to status changes over WebSocket.
+  version: 1.2.0
+  description: Wake-on-LAN registry with live presence (v1.2). Send magic packets
+    (single, batch, scheduled, one-shot), track devices, scan and adopt the LAN,
+    monitor reachability, back up and restore state, and subscribe to status
+    changes over WebSocket.
   license:
     name: MIT
 servers:
@@ -69,6 +71,36 @@ paths:
           description: Interactive documentation page
           content:
             text/html:
+              schema:
+                type: string
+  /dashboard:
+    get:
+      tags: [System]
+      summary: Device dashboard
+      description: Server-rendered single-page dashboard (plain HTML, no build step).
+        Public like /docs; API calls from the page carry a user-entered Bearer
+        via the Authorization header.
+      operationId: dashboard
+      security: []
+      responses:
+        '200':
+          description: Dashboard HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+  /manifest.json:
+    get:
+      tags: [System]
+      summary: Dashboard web manifest
+      description: Minimal PWA manifest making /dashboard installable (start_url /dashboard).
+      operationId: dashboardManifest
+      security: []
+      responses:
+        '200':
+          description: Web app manifest
+          content:
+            application/manifest+json:
               schema:
                 type: string
   /ws:
@@ -289,7 +321,7 @@ paths:
     post:
       tags: [Wake]
       summary: Schedule a one-shot wake (alias)
-      description: Alias of POST /wake/oneshots with the same body and 201 response.
+      description: Alias of POST /wake/oneshots with the same body and 201 response. Fire time must be 5s to 24h ahead; shares the wake throttle.
       operationId: createOneshotAlias
       requestBody:
         required: true
@@ -969,7 +1001,7 @@ paths:
     post:
       tags: [Devices]
       summary: Schedule a one-shot wake
-      description: Exactly one of device_id or mac, at most 24h ahead. Shares the wake throttle. Fires once as a manual wake with the optional note.
+      description: Exactly one of device_id or mac, firing once 5s to 24h ahead. Shares the wake throttle. Fires once as a manual wake with the optional note.
       operationId: createOneshot
       requestBody:
         required: true
