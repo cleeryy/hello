@@ -163,7 +163,7 @@ function render(){
     for(const t of (d.tags||[])){const chip=document.createElement('button');chip.className='mr-1 rounded-full border border-stone-300 px-2 py-0.5 hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';chip.textContent='#'+t;chip.setAttribute('aria-label','Filter by tag '+t);chip.onclick=e=>{e.stopPropagation();tagFilter=t;render();};tg.appendChild(chip);}
     const hlink=document.createElement('button');hlink.className='ml-1 underline hover:no-underline';hlink.textContent='history';hlink.setAttribute('aria-label','Show wake history for '+id);hlink.onclick=e=>{e.stopPropagation();$('sec-history').open=true;$('hDev').value=id;saveHistFilters();loadHistory();$('sec-history').scrollIntoView();};
     tg.appendChild(hlink);
-    const dline=document.createElement('span');d.appendChild(dline);
+    const dline=document.createElement('span');det.appendChild(dline);
     dline.textContent=id+' · ping '+(d.ping_enabled?'on':'off')+' · '+(d.wake_count||0)+' wake(s) · '+(d.last_wake_at?fmtTime(d.last_wake_at):'never');
     if(d.notes){det.appendChild(document.createElement('br'));const ns=document.createElement('span');ns.textContent='note: '+d.notes;det.appendChild(ns);}
     nm.onclick=()=>det.classList.toggle('hidden');
@@ -182,7 +182,7 @@ function render(){
 function syncFilterBtns(){document.querySelectorAll('#filters button').forEach(x=>x.className='rounded-lg px-3 py-1.5 border border-stone-300 dark:border-stone-700');const b=document.querySelector('#filters button[data-f="'+filter+'"]');if(b)b.className='rounded-lg px-3 py-1.5 bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900';}
 function nameOf(id){const d=devices.find(x=>(x.id||'')===id);return d?(d.name||d.id||id):id;}
 function fmtTime(at){try{return new Date(Number(at)*1000).toLocaleString();}catch{return '';}}
-function histQuery(){const p=new URLSearchParams();p.set('limit','20');const dev=$('hDev').value.trim();if(dev)p.set('device_id',dev);if($('hTrig').value)p.set('trigger',$('hTrig').value);if($('hOk').value)p.set('success',$('hOk').value);if($('hSince').value){try{p.set('since',new Date($('hSince').value+'T00:00:00Z').toISOString());}catch(e){}}return '/history?limit='+encodeURIComponent('20')+'&'+p.toString();}
+function histQuery(){const p=new URLSearchParams();const dev=$('hDev').value.trim();if(dev)p.set('device_id',dev);if($('hTrig').value)p.set('trigger',$('hTrig').value);if($('hOk').value)p.set('success',$('hOk').value);if($('hSince').value){try{p.set('since',new Date($('hSince').value+'T00:00:00Z').toISOString());}catch(e){}}const q=p.toString();return '/history?limit=20'+(q?'&'+q:'');}
 function saveHistFilters(){ls.set('hello.hist',JSON.stringify({dev:$('hDev').value,trig:$('hTrig').value,ok:$('hOk').value,since:$('hSince').value}));}
 function restoreHistFilters(){try{const f=JSON.parse(ls.get('hello.hist','null')||'null');if(!f)return;$('hDev').value=f.dev||'';$('hTrig').value=f.trig||'';$('hOk').value=f.ok||'';$('hSince').value=f.since||'';}catch(e){}}
 async function loadHistory(){
@@ -220,7 +220,7 @@ async function loadSchedules(){
       li.appendChild(box);
       if(s.last_result){const b=document.createElement('span');b.className=s.last_result==='success'?'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200':'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200';b.textContent=s.last_result;li.appendChild(b);}
       const t=document.createElement('button');t.className='rounded-xl border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';t.textContent=s.enabled?'On':'Off';
-      t.onclick=async()=>{t.disabled=true;try{await api('/schedules/'+encodeURIComponent(s.id),{method:'PUT',body:JSON.stringify({id:s.id,device_id:s.device_id,cron:s.cron,enabled:!s.enabled})});loadSchedules();}catch(e){say(String(e.message||e));}finally{t.disabled=false;}};
+      t.onclick=async()=>{t.disabled=true;try{await api('/schedules/'+encodeURIComponent(s.id),{method:'PUT',body:JSON.stringify({...s,enabled:!s.enabled})});loadSchedules();}catch(e){say(String(e.message||e));}finally{t.disabled=false;}};
       const dup=document.createElement('button');dup.className='rounded-xl border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';dup.textContent='Duplicate';
       dup.onclick=async()=>{dup.disabled=true;try{await api('/schedules/'+encodeURIComponent(s.id)+'/duplicate',{method:'POST'});say('Schedule duplicated.');loadSchedules();}catch(e){say(String(e.message||e));}finally{dup.disabled=false;}};
       const fire=document.createElement('button');fire.className='rounded-xl border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800';fire.textContent='Fire';
