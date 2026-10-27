@@ -595,3 +595,32 @@ func TestParity_deviceUptime(t *testing.T) {
 func writeFile0600(path string, raw []byte) error {
 	return os.WriteFile(path, raw, 0o600)
 }
+
+// Given: a device with two enabled schedules and one without
+// When: GET /devices/:id
+// Then: next_run is the earliest fire, omitted for unscheduled devices, and
+// never written back to the registry.
+func TestParity_deviceDetailNextRun(t *testing.T) {
+	s, _, st := newParityFull(t)
+	seedParityDevices(t, s)
+	_, err := st.Create(models.Schedule{ID: "late", DeviceID: "pc1", Cron: "0 8 * * *"})
+	require.NoError(t, err)
+	_, err = st.Create(models.Schedule{ID: "early", DeviceID: "pc1", Cron: "0 7 * * *"})
+	require.NoError(t, err)
+
+	w := doRequest(s, http.MethodGet, "/devices/pc1", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var got struct {
+		NextRun int64 `json:"next_run"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Greater(t, got.NextRun, time.Now().Unix())
+
+	stored, err := s.store.Get("pc1")
+	require.NoError(t, err)
+	require.Zero(t, stored.NextRun, "next_run must stay serve-time only")
+
+	w = doRequest(s, http.MethodGet, "/devices/pc3", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotContains(t, w.Body.String(), "next_run")
+}
