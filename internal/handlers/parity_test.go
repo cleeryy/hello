@@ -263,7 +263,7 @@ func TestParity_batchCooldownAndBroadcast(t *testing.T) {
 	s.cfg.WakeCooldownSec = 60
 	require.NoError(t, s.store.RecordWake("pc1", time.Now().Unix()))
 	var sent []string
-	s.sendWOL = func(mac, broadcast string) error { sent = append(sent, mac+("|")+broadcast); return nil }
+	s.sendWOL = func(mac, broadcast string) error { sent = append(sent, mac+"|"+broadcast); return nil }
 
 	w := doRequest(s, http.MethodPost, "/devices/wake-batch", map[string]any{"ids": []string{"pc1"}})
 	require.Equal(t, http.StatusOK, w.Code)

@@ -158,26 +158,6 @@ func parseWakeOptions(c *gin.Context, fallback string) (string, string, bool) {
 	return note, broadcast, true
 }
 
-// resolveBatchBroadcast reads the ?broadcast_ip= override shared by the
-// batch wake endpoints (?broadcast= stays accepted as an alias). Empty means
-// each device uses its computed directed broadcast.
-func resolveBatchBroadcast(c *gin.Context) (string, bool) {
-	for _, key := range []string{"broadcast_ip", "broadcast"} {
-		raw := strings.TrimSpace(c.Query(key))
-		if raw == "" {
-			continue
-		}
-		ip := net.ParseIP(raw)
-		if ip == nil || ip.To4() == nil {
-			writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
-				fmt.Sprintf("broadcast %q is not a valid IPv4 address", raw), nil)
-			return "", false
-		}
-		return raw, true
-	}
-	return "", true
-}
-
 // Retry bounds keep the worst case inside the 15s server write timeout:
 // at most 8s of polling sleeps plus one 1s ping per attempt.
 const (
