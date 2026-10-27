@@ -1915,8 +1915,15 @@ paths:
   /monitor/check:
     post:
       tags: [Monitor]
-      summary: Poll every device now
+      summary: Poll every device now, or one with ?device_id=
       operationId: checkMonitor
+      parameters:
+        - name: device_id
+          in: query
+          required: false
+          description: Probe only this device; an unknown id returns 404
+          schema:
+            type: string
       responses:
         '200':
           description: Immediate polling pass outcome
@@ -2200,6 +2207,11 @@ components:
           type: integer
           minimum: 0
           description: Per-device monitor cadence in seconds, 0 follows the global interval
+        next_run:
+          type: integer
+          format: int64
+          readOnly: true
+          description: Earliest upcoming schedule fire (unix seconds), computed by GET /devices/{id} only and never persisted
       additionalProperties: false
     DeviceInput:
       type: object
@@ -2666,6 +2678,9 @@ components:
           type: integer
         changed:
           type: integer
+        device_id:
+          type: string
+          description: Present when the check targeted one device
       additionalProperties: false
     Transition:
       type: object
