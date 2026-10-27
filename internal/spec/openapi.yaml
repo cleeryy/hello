@@ -101,6 +101,15 @@ paths:
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -119,6 +128,15 @@ paths:
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -139,6 +157,15 @@ paths:
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -158,6 +185,15 @@ paths:
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -223,10 +259,22 @@ paths:
       responses:
         '200':
           description: Current registry snapshot
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceList'
+        '304':
+          description: Registry unchanged, ETag matches If-None-Match
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -408,6 +456,15 @@ paths:
       responses:
         '200':
           description: Matched set plus per-device outcome
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -633,6 +690,15 @@ paths:
       responses:
         '200':
           description: Magic packet sent
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -678,6 +744,15 @@ paths:
       responses:
         '201':
           description: One-shot armed
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -1104,6 +1179,15 @@ paths:
       responses:
         '200':
           description: Discovered candidates, known flags the registry
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -1146,12 +1230,30 @@ paths:
       responses:
         '200':
           description: Dry-run preview, nothing persisted
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdoptPreview'
         '201':
           description: Devices created
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -1207,6 +1309,15 @@ paths:
       responses:
         '201':
           description: Adoption report, devices may be empty when nothing is new
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
           content:
             application/json:
               schema:
@@ -1388,6 +1499,10 @@ paths:
       tags: [System]
       summary: Download a full backup envelope
       operationId: backup
+      description: >-
+        Devices and schedules are sorted by id and the discovery ignore list
+        is included, so two backups of unchanged state are byte-identical.
+        History is newest-first, bounded by the history retention cap.
       responses:
         '200':
           description: Versioned backup, served as an attachment
@@ -1395,6 +1510,8 @@ paths:
             Content-Disposition:
               schema:
                 type: string
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
           content:
             application/json:
               schema:
@@ -1406,6 +1523,15 @@ paths:
       tags: [System]
       summary: Validate and apply a backup envelope
       operationId: restore
+      description: >-
+        Restore is all-or-nothing: the whole payload is validated first,
+        then devices, schedules, history and the ignore list are applied in
+        order. Any apply failure rolls the already-applied stores back and
+        reports 500, so the registry is never left half-restored. Each
+        schedule must target a device already in the registry or included in
+        the same payload, otherwise 422. History payloads over the retention
+        cap are rejected with 422, never silently truncated, and restored
+        ids never move the wake-event sequence backwards.
       parameters:
         - name: dry_run
           in: query
@@ -1421,6 +1547,9 @@ paths:
       responses:
         '200':
           description: Restore counts, or validation counts in dry_run mode
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
           content:
             application/json:
               schema:
@@ -1443,6 +1572,9 @@ paths:
       responses:
         '200':
           description: Settings with the token never included
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
           content:
             application/json:
               schema:
@@ -2014,26 +2146,31 @@ components:
       additionalProperties: false
     BackupEnvelope:
       type: object
-      required: [version, exported_at, devices, history, schedules]
+      required: [version, devices, history, schedules]
       properties:
         version:
           type: integer
           example: 1
-        exported_at:
-          type: integer
-          format: int64
         devices:
           type: array
+          description: Registry snapshot, sorted by id
           items:
             $ref: '#/components/schemas/Device'
         history:
           type: array
+          description: Wake log newest-first, bounded by the history retention cap
           items:
             $ref: '#/components/schemas/WakeEvent'
         schedules:
           type: array
+          description: Schedules sorted by id
           items:
             $ref: '#/components/schemas/Schedule'
+        ignore:
+          type: array
+          description: Persisted discovery ignore list (MACs then IPs, sorted)
+          items:
+            $ref: '#/components/schemas/IgnoreEntry'
     RestoreInput:
       type: object
       properties:
@@ -2043,12 +2180,17 @@ components:
             $ref: '#/components/schemas/Device'
         history:
           type: array
+          description: Must fit the history retention cap, never truncated
           items:
             $ref: '#/components/schemas/WakeEvent'
         schedules:
           type: array
           items:
             $ref: '#/components/schemas/Schedule'
+        ignore:
+          type: array
+          items:
+            $ref: '#/components/schemas/IgnoreEntry'
     RestoreDryRun:
       type: object
       required: [dry_run, valid, counts]
@@ -2068,6 +2210,8 @@ components:
               type: integer
             history:
               type: integer
+            ignore:
+              type: integer
     RestoreResult:
       type: object
       required: [restored]
@@ -2081,6 +2225,8 @@ components:
             schedules:
               type: integer
             history:
+              type: integer
+            ignore:
               type: integer
     RuntimeConfig:
       type: object
@@ -2106,6 +2252,10 @@ components:
           type: boolean
         webhooks:
           type: object
+          description: >-
+            Presence flags only, never URLs. Webhook targets are
+            operator-controlled and must be trusted: the server POSTs JSON
+            event payloads to them (SSRF surface).
           required: [status, wake]
           properties:
             status:
@@ -2289,10 +2439,38 @@ components:
           description: Seconds to wait before retrying
           schema:
             type: integer
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+  headers:
+    X-Request-ID:
+      description: Echoed valid request id, minted otherwise; present on every response
+      schema:
+        type: string
+    ETag:
+      description: Content hash of the response body; send back as If-None-Match for 304
+      schema:
+        type: string
+    X-RateLimit-Limit:
+      description: Request budget per cooldown window
+      schema:
+        type: integer
+    X-RateLimit-Remaining:
+      description: Requests left in the window, 0 on 429
+      schema:
+        type: integer
+    X-RateLimit-Reset:
+      description: Unix timestamp when the window resets
+      schema:
+        type: integer
+        format: int64
   securitySchemes:
     bearerAuth:
       type: http

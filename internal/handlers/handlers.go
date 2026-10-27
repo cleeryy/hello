@@ -39,6 +39,13 @@ type Server struct {
 	// statusNotify and wakeNotify post webhook events; nil means disabled.
 	statusNotify *notify.Sender
 	wakeNotify   *notify.Sender
+	// Restore apply seams. Nil means "call the wired store": tests set
+	// these to force a mid-restore failure and assert all-or-nothing
+	// rollback without touching the filesystem.
+	applyDevices   func([]*models.Device) ([]*models.Device, error)
+	applySchedules func([]models.Schedule) ([]models.Schedule, error)
+	applyHistory   func([]models.WakeEvent) error
+	applyIgnore    func([]discover.Entry) error
 	// pingHost checks reachability for retry-until-up; stubbed in tests.
 	pingHost func(ip string, timeout time.Duration) bool
 	started  time.Time
@@ -94,6 +101,20 @@ func (s *Server) WithDiscover(d *discover.Scanner) *Server {
 func (s *Server) WithIgnoreList(il *discover.IgnoreList) *Server {
 	s.ignore = il
 	return s
+}
+
+// NotifyStatus fans a reachability change out to the realtime hub and the
+// status webhook. Main wires it as the monitor callback so the status
+// sender is exercised through the Server and stays testable.
+func (s *Server) NotifyStatus(dev models.Device) {
+	if s.hub != nil {
+		s.hub.Broadcast(dev)
+	}
+	s.statusNotify.Send(notify.StatusPayload{
+		DeviceID: dev.ID,
+		Status:   string(dev.Status),
+		At:       time.Now().Unix(),
+	})
 }
 
 // WithMonitor wires the reachability monitor; without it the monitor routes

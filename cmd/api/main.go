@@ -27,35 +27,45 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "doctor":
-			if err := runDoctor(os.Args[2:]); err != nil {
-				slog.Error("doctor failed", slog.Any("err", err))
-				os.Exit(1)
-			}
-			return
-		case "version", "--version", "-v":
-			fmt.Println(handlers.Version)
-			return
-		case "seed":
-			src := "devices.example.json"
-			if len(os.Args) > 2 {
-				src = os.Args[2]
-			}
-			count, err := seedDevices(seedFile(), src)
-			if err != nil {
-				slog.Error("seed failed", slog.Any("err", err))
-				os.Exit(1)
-			}
-			slog.Info("seeded devices", slog.Int("count", count))
-			return
+	if handled, err := runCommand(os.Args[1:]); handled {
+		if err != nil {
+			slog.Error("command failed", slog.Any("err", err))
+			os.Exit(1)
 		}
+		return
 	}
 	if err := run(); err != nil {
 		slog.Error("fatal", slog.Any("err", err))
 		os.Exit(1)
 	}
+}
+
+// runCommand handles the doctor/version/seed subcommands. It reports
+// whether args named a subcommand, so --version output and doctor wiring
+// stay testable without exiting the process.
+func runCommand(args []string) (bool, error) {
+	if len(args) == 0 {
+		return false, nil
+	}
+	switch args[0] {
+	case "doctor":
+		return true, runDoctor(args[1:])
+	case "version", "--version", "-v":
+		fmt.Println(handlers.Version)
+		return true, nil
+	case "seed":
+		src := "devices.example.json"
+		if len(args) > 1 {
+			src = args[1]
+		}
+		count, err := seedDevices(seedFile(), src)
+		if err != nil {
+			return true, err
+		}
+		slog.Info("seeded devices", slog.Int("count", count))
+		return true, nil
+	}
+	return false, nil
 }
 
 // autoScan runs a LAN sweep on a cadence until ctx ends. A failed sweep is
@@ -197,16 +207,6 @@ func run() error {
 	go sch.Start(ctx)
 
 	mon := monitor.NewWithTimeout(store, cfg.MonitorInterval, time.Duration(cfg.PingTimeoutSec)*time.Second)
-	mon.OnStatusChange = func(dev models.Device) {
-		hub.Broadcast(dev)
-		statusSender.Send(notify.StatusPayload{
-			DeviceID: dev.ID,
-			Status:   string(dev.Status),
-			At:       time.Now().Unix(),
-		})
-	}
-	mon.Start(ctx)
-	defer mon.Stop()
 
 	disc := discover.New()
 	disc.SetCooldown(time.Duration(cfg.DiscoverCooldownSec) * time.Second)
@@ -236,14 +236,19 @@ func run() error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	handlers.New(cfg, store, hub).
+	api := handlers.New(cfg, store, hub).
 		WithHistory(hist).
 		WithSchedules(schedStore, sch).
 		WithDiscover(disc).
 		WithIgnoreList(ignore).
 		WithMonitor(mon).
-		WithNotify(statusSender, wakeSender).
-		Mount(r)
+		WithNotify(statusSender, wakeSender)
+	// Status changes fan out through the Server so the status webhook
+	// sender is exercised on the same path the tests cover.
+	mon.OnStatusChange = api.NotifyStatus
+	mon.Start(ctx)
+	defer mon.Stop()
+	api.Mount(r)
 	handlers.RegisterDashboard(r)
 
 	errCh := make(chan error, 1)

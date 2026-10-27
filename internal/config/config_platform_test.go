@@ -34,6 +34,21 @@ func TestLoadConfig_tokenFile(t *testing.T) {
 	require.Equal(t, "file-token-abcdef-1234567890", cfg.APIToken)
 }
 
+// Given: both API_TOKEN and API_TOKEN_FILE set to different tokens
+// When: loading config
+// Then: the environment value wins, the file is ignored.
+func TestLoadConfig_tokenEnvWinsOverFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token.txt")
+	require.NoError(t, os.WriteFile(path, []byte("file-token-abcdef-1234567890"), 0o600))
+	t.Setenv("API_TOKEN", "env-token-abcdef-1234567890")
+	t.Setenv("API_TOKEN_FILE", path)
+	t.Setenv("DEFAULT_MAC", "00:11:22:33:44:55")
+	cfg, err := config.LoadConfig()
+	require.NoError(t, err)
+	require.Equal(t, "env-token-abcdef-1234567890", cfg.APIToken)
+}
+
 // Given: API_TOKEN_FILE pointing nowhere
 // When: loading config
 // Then: startup fails with a read error.

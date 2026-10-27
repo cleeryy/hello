@@ -133,12 +133,18 @@ curl -sf "${AUTH[@]}" -X POST "$API/restore" \
   -d @/tmp/hello-backup.json | jq .
 
 echo "19. Redacted runtime config (no token)"
-curl -sf "${AUTH[@]}" "$API/config" | jq .
-if curl -s "${AUTH[@]}" "$API/config" | grep -qi "token.*[A-Za-z0-9_-]\{16\}"; then
-  echo "token leaked in /config"
+CONFIG_BODY=$(curl -sf "${AUTH[@]}" "$API/config")
+echo "$CONFIG_BODY" | jq .
+if echo "$CONFIG_BODY" | jq -e '[keys[] | select(test("(?i)token") and . != "token_from_file")] | length == 0' > /dev/null; then
+  echo "no api_token/token value key in /config"
+else
+  echo "token value key leaked in /config"
   exit 1
 fi
-echo "no token in /config"
+if echo "$CONFIG_BODY" | grep -qF "$API_TOKEN"; then
+  echo "token value leaked in /config"
+  exit 1
+fi
 
 echo "20. Doctor passes on this environment"
 API_TOKEN="$API_TOKEN" DEFAULT_MAC="$DEFAULT_MAC" go run ./cmd/api doctor

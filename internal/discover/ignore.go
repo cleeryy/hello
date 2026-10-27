@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -67,15 +68,26 @@ type Entry struct {
 	IP  string `json:"ip,omitempty"`
 }
 
-// List returns every ignored address, MACs first then IPs, both sorted.
+// List returns every ignored address, MACs first then IPs, each group
+// sorted so backups and API responses stay deterministic.
 func (il *IgnoreList) List() []Entry {
 	il.mu.RLock()
 	defer il.mu.RUnlock()
-	out := make([]Entry, 0, len(il.macs)+len(il.ips))
+	macs := make([]string, 0, len(il.macs))
 	for mac := range il.macs {
+		macs = append(macs, mac)
+	}
+	sort.Strings(macs)
+	ips := make([]string, 0, len(il.ips))
+	for ip := range il.ips {
+		ips = append(ips, ip)
+	}
+	sort.Strings(ips)
+	out := make([]Entry, 0, len(macs)+len(ips))
+	for _, mac := range macs {
 		out = append(out, Entry{MAC: mac})
 	}
-	for ip := range il.ips {
+	for _, ip := range ips {
 		out = append(out, Entry{IP: ip})
 	}
 	return out
@@ -176,6 +188,42 @@ func (il *IgnoreList) Remove(mac, ip string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// ReplaceAll validates a full ignore-list replacement, then performs one
+// locked write. On persistence failure the in-memory set is restored to its
+// prior state, so callers can treat restore as all-or-nothing.
+func (il *IgnoreList) ReplaceAll(entries []Entry) error {
+	macs := make(map[string]struct{}, len(entries))
+	ips := make(map[string]struct{}, len(entries))
+	for i, e := range entries {
+		if trimmed := strings.TrimSpace(e.MAC); trimmed != "" {
+			parsed, err := net.ParseMAC(trimmed)
+			if err != nil {
+				return fmt.Errorf("discover: replace index %d: invalid mac %q", i, e.MAC)
+			}
+			macs[parsed.String()] = struct{}{}
+		}
+		if trimmed := strings.TrimSpace(e.IP); trimmed != "" {
+			if net.ParseIP(trimmed) == nil {
+				return fmt.Errorf("discover: replace index %d: invalid ip %q", i, e.IP)
+			}
+			ips[trimmed] = struct{}{}
+		}
+		if strings.TrimSpace(e.MAC) == "" && strings.TrimSpace(e.IP) == "" {
+			return fmt.Errorf("discover: replace index %d: mac or ip is required", i)
+		}
+	}
+	il.mu.Lock()
+	defer il.mu.Unlock()
+	previousMACs := il.macs
+	previousIPs := il.ips
+	il.macs, il.ips = macs, ips
+	if err := il.saveLocked(); err != nil {
+		il.macs, il.ips = previousMACs, previousIPs
+		return err
+	}
+	return nil
 }
 
 func (il *IgnoreList) saveLocked() error {
