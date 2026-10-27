@@ -24,12 +24,13 @@ const (
 
 // oneshotEntry is a pending delayed wake.
 type oneshotEntry struct {
-	ID       string `json:"id"`
-	DeviceID string `json:"device_id,omitempty"`
-	MAC      string `json:"mac"`
-	At       int64  `json:"at"`
-	Note     string `json:"note,omitempty"`
-	timer    *time.Timer
+	ID        string `json:"id"`
+	DeviceID  string `json:"device_id,omitempty"`
+	MAC       string `json:"mac"`
+	At        int64  `json:"at"`
+	Note      string `json:"note,omitempty"`
+	Broadcast string `json:"broadcast,omitempty"`
+	timer     *time.Timer
 }
 
 // oneshotRegistry holds pending delayed wakes. Entries are ephemeral:
@@ -47,10 +48,12 @@ func newOneshotRegistry() *oneshotRegistry {
 // createOneshot schedules a single delayed wake for a device or raw MAC.
 func (s *Server) createOneshot(c *gin.Context) {
 	var in struct {
-		DeviceID string `json:"device_id"`
-		MAC      string `json:"mac"`
-		At       string `json:"at"`
-		Note     string `json:"note"`
+		DeviceID    string `json:"device_id"`
+		MAC         string `json:"mac"`
+		At          string `json:"at"`
+		Note        string `json:"note"`
+		BroadcastIP string `json:"broadcast_ip"`
+		Broadcast   string `json:"broadcast"`
 	}
 	if err := c.ShouldBindJSON(&in); err != nil {
 		writeProblem(c, http.StatusBadRequest, "bad request", "malformed json body", nil)
@@ -98,14 +101,26 @@ func (s *Server) createOneshot(c *gin.Context) {
 			"note must be at most 140 characters", nil)
 		return
 	}
+	broadcast := strings.TrimSpace(in.BroadcastIP)
+	if broadcast == "" {
+		broadcast = strings.TrimSpace(in.Broadcast)
+	}
+	if broadcast != "" {
+		if ip := net.ParseIP(broadcast); ip == nil || ip.To4() == nil {
+			writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+				fmt.Sprintf("broadcast %q is not a valid IPv4 address", broadcast), nil)
+			return
+		}
+	}
 	s.oneshots.mu.Lock()
 	s.oneshots.seq++
 	entry := &oneshotEntry{
-		ID:       fmt.Sprintf("o-%d-%d", time.Now().UnixNano(), s.oneshots.seq),
-		DeviceID: deviceID,
-		MAC:      mac,
-		At:       at.Unix(),
-		Note:     note,
+		ID:        fmt.Sprintf("o-%d-%d", time.Now().UnixNano(), s.oneshots.seq),
+		DeviceID:  deviceID,
+		MAC:       mac,
+		At:        at.Unix(),
+		Note:      note,
+		Broadcast: broadcast,
 	}
 	id := entry.ID
 	entry.timer = time.AfterFunc(delay, func() { s.fireOneshot(id) })
@@ -160,6 +175,9 @@ func (s *Server) fireOneshot(id string) {
 		if dev, err := s.store.Get(id); err == nil {
 			broadcast = wol.BroadcastForIP(dev.IP, s.cfg.BroadcastIP)
 		}
+	}
+	if strings.TrimSpace(entry.Broadcast) != "" {
+		broadcast = entry.Broadcast
 	}
 	if err := s.sendWOL(entry.MAC, broadcast); err != nil {
 		slog.Error("one-shot wol failed", slog.String("id", id), slog.Any("err", err))

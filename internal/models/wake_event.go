@@ -44,6 +44,9 @@ type WakeEvent struct {
 	// Note is an optional human annotation recorded with the wake.
 	Note  string `json:"note,omitempty"`
 	Error string `json:"error,omitempty"`
+	// ScheduleID links a schedule-triggered wake to its schedule; empty
+	// for manual wakes. Part of the on-disk/API contract (F-39).
+	ScheduleID string `json:"schedule_id,omitempty"`
 }
 
 // Validate checks the invariants of a wake event.

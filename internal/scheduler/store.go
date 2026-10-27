@@ -248,6 +248,33 @@ func (s *Store) SetAllEnabled(enabled bool) (int, error) {
 	return changed, nil
 }
 
+// SetEnabled flips the given schedule ids at once, persists once, and
+// returns the updated ids. Unknown ids fail the whole batch (422 at the
+// HTTP seam), so a bulk enable/disable never half-applies.
+func (s *Store) SetEnabled(ids []string, enabled bool) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		if _, ok := s.items[id]; !ok {
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
+		}
+	}
+	previous := make(map[string]models.Schedule, len(s.items))
+	for id, item := range s.items {
+		previous[id] = item
+	}
+	for _, id := range ids {
+		item := s.items[id]
+		item.Enabled = enabled
+		s.items[id] = item
+	}
+	if err := s.saveLocked(); err != nil {
+		s.items = previous
+		return nil, err
+	}
+	return append([]string(nil), ids...), nil
+}
+
 // MarkFired records a fire on a schedule. A consumed one-shot schedule is
 // disabled and detached from its single fire time, keeping the cron row as
 // history. Unknown ids are ignored: the runner may race a delete.

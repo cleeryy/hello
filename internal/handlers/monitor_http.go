@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -10,6 +11,15 @@ import (
 
 // checkMonitor runs one immediate polling pass and reports what it saw.
 func (s *Server) checkMonitor(c *gin.Context) {
+	if id := strings.TrimSpace(c.Query("device_id")); id != "" {
+		if _, err := s.store.Get(id); err != nil {
+			writeErr(c, err)
+			return
+		}
+		checked, changed := s.mon.CheckOne(id)
+		c.JSON(http.StatusOK, gin.H{"checked": checked, "changed": changed, "device_id": id})
+		return
+	}
 	checked, changed := s.mon.Check()
 	c.JSON(http.StatusOK, gin.H{"checked": checked, "changed": changed})
 }
@@ -46,6 +56,37 @@ func (s *Server) monitorUptime(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"devices": out})
+}
+
+// deviceUptime reports one device's honest poll summary (F-57): raw check
+// counters from the monitor plus the latest recorded change and the
+// monitor start time. Unknown devices 404; never-polled devices report
+// zero checks with the monitor start time.
+func (s *Server) deviceUptime(c *gin.Context) {
+	dev, err := s.store.Get(c.Param("id"))
+	if err != nil {
+		writeErr(c, err)
+		return
+	}
+	detail, ok := s.mon.Detail(dev.ID)
+	if !ok {
+		detail = monitor.DeviceUptime{Since: s.mon.Since()}
+	}
+	up, total := detail.Up, detail.Total
+	down := total - up
+	percent := 0.0
+	if total > 0 {
+		percent = float64(up) / float64(total) * 100
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"device_id":   dev.ID,
+		"checks":      total,
+		"up":          up,
+		"down":        down,
+		"percent":     percent,
+		"last_change": detail.LastChange,
+		"since":       detail.Since,
+	})
 }
 
 // monitorFlapping lists devices flapping right now (4+ changes in 5 minutes).

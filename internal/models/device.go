@@ -89,6 +89,9 @@ type Device struct {
 	// MonitorSecs overrides the global monitor interval for this device.
 	// Zero keeps the global cadence.
 	MonitorSecs int `json:"monitor_secs,omitempty"`
+	// NextRun is the earliest upcoming schedule fire for this device,
+	// computed at serve time by GET /devices/:id. Never persisted.
+	NextRun int64 `json:"next_run,omitempty"`
 }
 
 // Normalize fills defaults for absent fields.

@@ -56,6 +56,7 @@ type Monitor struct {
 	lastRun     time.Time
 	lastChecked int
 	lastChanged int
+	startedAt   time.Time
 }
 
 // New returns a Monitor polling every interval with a 2s per-host timeout.
@@ -72,6 +73,7 @@ func NewWithTimeout(store *storage.Storage, interval, timeout time.Duration) *Mo
 		stopCh:    make(chan struct{}),
 		uptime:    map[string]*uptimeStat{},
 		lastCheck: map[string]time.Time{},
+		startedAt: time.Now(),
 	}
 }
 
@@ -107,7 +109,7 @@ func (m *Monitor) run(ctx context.Context) {
 }
 
 func (m *Monitor) poll() {
-	_, _, fired := m.checkDevices()
+	_, _, fired := m.checkDevices("")
 	for _, dev := range fired {
 		if m.OnStatusChange != nil {
 			m.OnStatusChange(dev)
@@ -117,7 +119,17 @@ func (m *Monitor) poll() {
 
 // Check runs one polling pass on demand and reports checked/changed counts.
 func (m *Monitor) Check() (checked, changed int) {
-	checked, changed, fired := m.checkDevices()
+	return m.check("")
+}
+
+// CheckOne probes a single device on demand. An unknown id reports zero
+// checks; the periodic loop keeps polling independently.
+func (m *Monitor) CheckOne(id string) (checked, changed int) {
+	return m.check(id)
+}
+
+func (m *Monitor) check(onlyID string) (checked, changed int) {
+	checked, changed, fired := m.checkDevices(onlyID)
 	for _, dev := range fired {
 		if m.OnStatusChange != nil {
 			m.OnStatusChange(dev)
@@ -126,11 +138,14 @@ func (m *Monitor) Check() (checked, changed int) {
 	return checked, changed
 }
 
-func (m *Monitor) checkDevices() (checked, changed int, fired []models.Device) {
+func (m *Monitor) checkDevices(onlyID string) (checked, changed int, fired []models.Device) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
 	for _, d := range m.store.GetAll() {
+		if onlyID != "" && d.ID != onlyID {
+			continue
+		}
 		if d.IP == "" || !d.PingEnabled {
 			continue
 		}
@@ -201,6 +216,36 @@ func (m *Monitor) Transitions() []Transition {
 	return out
 }
 
+// DeviceUptime is the honest per-device poll summary backing
+// GET /devices/:id/uptime (F-57): raw poll counters plus the latest
+// recorded transition and the monitor start time. ok is false when the
+// device was never polled.
+type DeviceUptime struct {
+	Up         int
+	Total      int
+	LastChange int64
+	Since      int64
+}
+
+// Detail reports the per-device poll summary; ok is false when the device
+// was never polled.
+func (m *Monitor) Detail(deviceID string) (DeviceUptime, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st, found := m.uptime[deviceID]
+	if !found || st.total == 0 {
+		return DeviceUptime{}, false
+	}
+	out := DeviceUptime{Up: st.up, Total: st.total, Since: m.startedAt.Unix()}
+	for _, t := range m.transitions {
+		if t.DeviceID == deviceID {
+			out.LastChange = t.At
+			break
+		}
+	}
+	return out, true
+}
+
 // Uptime reports polls answered up over polls performed since start.
 // ok is false when the device was never polled.
 func (m *Monitor) Uptime(deviceID string) (up, total int, ok bool) {
@@ -233,6 +278,14 @@ func (m *Monitor) Flapping() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Since reports the monitor start time as unix seconds, backing the
+// per-device uptime summary for devices never polled yet.
+func (m *Monitor) Since() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.startedAt.Unix()
 }
 
 // Status snapshots the monitor loop figures for /monitor and /health.

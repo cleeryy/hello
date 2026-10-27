@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
 
+	"github.com/cleeryy/hello/internal/history"
 	"github.com/cleeryy/hello/internal/models"
 	"github.com/cleeryy/hello/internal/scheduler"
 	"github.com/cleeryy/hello/internal/wol"
@@ -154,6 +156,80 @@ func (s *Server) resumeSchedules(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"changed": resumed})
 }
 
+// maxBulkSchedules caps one bulk enable/disable call; wider batches are
+// rejected with 422 before anything is written.
+const maxBulkSchedules = 100
+
+// enableSchedules enables the ?ids=a,b schedules at once: POST
+// /schedules/enable?ids=a,b. Unknown ids 422 the whole batch (atomic),
+// then the runner reloads once. Answers {updated:[...]}.
+func (s *Server) enableSchedules(c *gin.Context) {
+	s.setSchedulesEnabled(c, true)
+}
+
+// disableSchedules disables the ?ids=a,b schedules at once: POST
+// /schedules/disable?ids=a,b. Same atomicity and reload contract as enable.
+func (s *Server) disableSchedules(c *gin.Context) {
+	s.setSchedulesEnabled(c, false)
+}
+
+func (s *Server) setSchedulesEnabled(c *gin.Context, enabled bool) {
+	raw := c.Query("ids")
+	if strings.TrimSpace(raw) == "" {
+		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+			"query param ids is required, e.g. ?ids=s1,s2", nil)
+		return
+	}
+	ids := make([]string, 0)
+	for _, id := range strings.Split(raw, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+			"query param ids carries no usable id", nil)
+		return
+	}
+	if len(ids) > maxBulkSchedules {
+		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+			fmt.Sprintf("at most %d ids per request, got %d", maxBulkSchedules, len(ids)), nil)
+		return
+	}
+	updated, err := s.schedStore.SetEnabled(ids, enabled)
+	if err != nil {
+		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity", err.Error(), nil)
+		return
+	}
+	s.sched.Reload()
+	c.JSON(http.StatusOK, gin.H{"updated": updated})
+}
+
+// scheduleHistory returns the recorded wakes fired by one schedule,
+// newest-first. Unknown schedules 404.
+func (s *Server) scheduleHistory(c *gin.Context) {
+	id := c.Param("id")
+	if _, err := s.schedStore.Get(id); err != nil {
+		writeScheduleErr(c, err)
+		return
+	}
+	limit := 50
+	if raw := c.Query("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeProblem(c, http.StatusBadRequest, "bad request",
+				"limit must be a positive integer", nil)
+			return
+		}
+		limit = n
+	}
+	rows := []models.WakeEvent{}
+	if s.hist != nil {
+		rows = s.hist.ListFiltered(history.Filter{ScheduleID: id}, limit)
+	}
+	c.JSON(http.StatusOK, gin.H{"history": rows})
+}
+
 // validateSchedule checks a cron expression without persisting anything.
 func (s *Server) validateSchedule(c *gin.Context) {
 	var in struct {
@@ -227,11 +303,12 @@ func (s *Server) fireScheduleNow(c *gin.Context) {
 	}
 	if s.hist != nil {
 		if _, err := s.hist.Record(models.WakeEvent{
-			DeviceID: dev.ID,
-			MAC:      dev.MAC,
-			Trigger:  models.TriggerSchedule,
-			Success:  true,
-			Attempts: 1,
+			DeviceID:   dev.ID,
+			MAC:        dev.MAC,
+			Trigger:    models.TriggerSchedule,
+			Success:    true,
+			Attempts:   1,
+			ScheduleID: sched.ID,
 		}); err != nil {
 			writeErr(c, err)
 			return

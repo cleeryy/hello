@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/cleeryy/hello/internal/models"
 	"github.com/cleeryy/hello/internal/wol"
 )
+
+// maxBulkDelete caps one DELETE /devices call; wider batches are rejected
+// with 422 before any write, so a capped call never half-applies.
+const maxBulkDelete = 50
 
 // bulkDeleteDevices removes several devices in one call:
 // DELETE /devices?ids=pc1,pc2. Unknown ids are reported, not fatal.
@@ -21,22 +26,25 @@ func (s *Server) bulkDeleteDevices(c *gin.Context) {
 			"query param ids is required, e.g. ?ids=pc1,pc2", nil)
 		return
 	}
-	deleted := []string{}
-	notFound := []string{}
+	ids := make([]string, 0)
 	for _, id := range strings.Split(raw, ",") {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
 		}
-		if err := s.store.Delete(id); err != nil {
-			notFound = append(notFound, id)
-			continue
-		}
-		deleted = append(deleted, id)
 	}
-	if len(deleted) == 0 && len(notFound) == 0 {
+	if len(ids) == 0 {
 		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
 			"query param ids carries no usable id", nil)
+		return
+	}
+	if len(ids) > maxBulkDelete {
+		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+			fmt.Sprintf("at most %d ids per request, got %d", maxBulkDelete, len(ids)), nil)
+		return
+	}
+	deleted, notFound, err := s.store.DeleteMany(ids)
+	if err != nil {
+		writeErr(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"deleted": deleted, "not_found": notFound})
@@ -79,20 +87,92 @@ func (s *Server) cloneDevice(c *gin.Context) {
 }
 
 // wakeBatchRequest selects wake targets by explicit ids, by tag, or both.
-// An empty selection means the whole registry.
+// An empty selection means the whole registry. Query params mirror the
+// body fields so POST /devices/wake and POST /wake/all share the shape.
 type wakeBatchRequest struct {
-	IDs    []string `json:"ids"`
-	Tag    string   `json:"tag"`
-	DryRun bool     `json:"dry_run"`
+	IDs         []string `json:"ids"`
+	Tag         string   `json:"tag"`
+	Status      string   `json:"status"`
+	DryRun      bool     `json:"dry_run"`
+	Note        string   `json:"note"`
+	BroadcastIP string   `json:"broadcast_ip"`
+	Broadcast   string   `json:"broadcast"`
 }
 
 // wakeBatch wakes several devices at once, reports per-device failures, and
 // supports dry_run to preview the target set without sending anything.
+// Query params (tag, status, dry_run, note, broadcast_ip) override the body.
 func (s *Server) wakeBatch(c *gin.Context) {
 	var in wakeBatchRequest
 	if c.Request.ContentLength != 0 {
 		if err := c.ShouldBindJSON(&in); err != nil {
 			writeBindingError(c, err)
+			return
+		}
+	}
+	in.mergeWakeQuery(c)
+	s.runWakeBatch(c, in)
+}
+
+// wakeFiltered backs POST /devices/wake and POST /wake/all: same
+// semantics and response shape as wake-batch, driven by query params
+// (?tag=, ?status=, ?dry_run=, ?note=, ?broadcast_ip=). No selection means
+// the whole registry.
+func (s *Server) wakeFiltered(c *gin.Context) {
+	var in wakeBatchRequest
+	in.mergeWakeQuery(c)
+	s.runWakeBatch(c, in)
+}
+
+// mergeWakeQuery overlays query params onto the request: tag, status, note
+// and broadcast lose to the query when both are present, dry_run is true
+// when either side says so.
+func (in *wakeBatchRequest) mergeWakeQuery(c *gin.Context) {
+	if v, present := c.GetQuery("tag"); present {
+		in.Tag = v
+	}
+	if v, present := c.GetQuery("status"); present {
+		in.Status = v
+	}
+	if v, present := c.GetQuery("note"); present {
+		in.Note = v
+	}
+	if v, present := c.GetQuery("broadcast_ip"); present {
+		in.BroadcastIP = v
+	}
+	if v, present := c.GetQuery("broadcast"); present {
+		in.Broadcast = v
+	}
+	if isDryRun(c) {
+		in.DryRun = true
+	}
+}
+
+// runWakeBatch resolves targets, validates the batch dimensions, and sends.
+// Devices inside their WAKE_COOLDOWN_SEC window land in failed with a
+// cooling-down error; nothing is sent for them and nothing is logged.
+func (s *Server) runWakeBatch(c *gin.Context, in wakeBatchRequest) {
+	if status := strings.ToLower(strings.TrimSpace(in.Status)); status != "" &&
+		status != string(models.StatusUp) && status != string(models.StatusDown) &&
+		status != string(models.StatusUnknown) {
+		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+			`status must be one of "up", "down", "unknown"`, nil)
+		return
+	}
+	note := strings.TrimSpace(in.Note)
+	if len([]rune(note)) > 140 {
+		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+			"note must be at most 140 characters", nil)
+		return
+	}
+	broadcast := strings.TrimSpace(in.BroadcastIP)
+	if broadcast == "" {
+		broadcast = strings.TrimSpace(in.Broadcast)
+	}
+	if broadcast != "" {
+		if ip := net.ParseIP(broadcast); ip == nil || ip.To4() == nil {
+			writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+				fmt.Sprintf("broadcast %q is not a valid IPv4 address", broadcast), nil)
 			return
 		}
 	}
@@ -117,13 +197,24 @@ func (s *Server) wakeBatch(c *gin.Context) {
 	woken := []string{}
 	failed := []gin.H{}
 	for _, d := range targets {
-		if err := s.sendWOL(d.MAC, wol.BroadcastForIP(d.IP, s.cfg.BroadcastIP)); err != nil {
+		if retryAfter := s.wakeCooldown(d); retryAfter > 0 {
+			failed = append(failed, gin.H{
+				"id":    d.ID,
+				"error": fmt.Sprintf("device %q cooling down, retry in %ds", d.ID, retryAfter),
+			})
+			continue
+		}
+		bc := broadcast
+		if bc == "" {
+			bc = wol.BroadcastForIP(d.IP, s.cfg.BroadcastIP)
+		}
+		if err := s.sendWOL(d.MAC, bc); err != nil {
 			slog.Error("wol batch send failed", slog.String("device", d.ID), slog.Any("err", err))
-			s.recordWake(d.MAC, false, err.Error(), 1, "")
+			s.recordWake(d.MAC, false, err.Error(), 1, note)
 			failed = append(failed, gin.H{"id": d.ID, "error": err.Error()})
 			continue
 		}
-		s.recordWake(d.MAC, true, "", 1, "")
+		s.recordWake(d.MAC, true, "", 1, note)
 		woken = append(woken, d.ID)
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -134,7 +225,8 @@ func (s *Server) wakeBatch(c *gin.Context) {
 	})
 }
 
-// selectWakeTargets resolves the union of ids and tag matches.
+// selectWakeTargets resolves the union of ids and tag matches, narrowed by
+// the status filter when one is set.
 func (s *Server) selectWakeTargets(in wakeBatchRequest) ([]*models.Device, string) {
 	seen := map[string]bool{}
 	var targets []*models.Device
@@ -167,6 +259,15 @@ func (s *Server) selectWakeTargets(in wakeBatchRequest) ([]*models.Device, strin
 	if len(in.IDs) == 0 && strings.TrimSpace(in.Tag) == "" {
 		targets = s.store.GetAll()
 	}
+	if status := strings.ToLower(strings.TrimSpace(in.Status)); status != "" {
+		kept := targets[:0]
+		for _, d := range targets {
+			if string(d.Status) == status {
+				kept = append(kept, d)
+			}
+		}
+		targets = kept
+	}
 	return targets, ""
 }
 
@@ -181,6 +282,10 @@ type importDevicesRequest struct {
 	Mode    string           `json:"mode"`
 }
 
+// maxImportDevices caps one POST /devices/import call; wider batches are
+// rejected with 422 before anything is validated or written.
+const maxImportDevices = 200
+
 // importDevices bulk-loads devices. Every entry is validated before anything
 // is written, so a bad batch never leaves a partial registry. Modes:
 // abort (default) refuses when any id exists, skip keeps existing ones,
@@ -194,6 +299,11 @@ func (s *Server) importDevices(c *gin.Context) {
 	if len(in.Devices) == 0 {
 		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
 			"devices must carry at least one entry", nil)
+		return
+	}
+	if len(in.Devices) > maxImportDevices {
+		writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
+			fmt.Sprintf("at most %d devices per import, got %d", maxImportDevices, len(in.Devices)), nil)
 		return
 	}
 	mode := in.Mode

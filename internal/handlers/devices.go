@@ -192,7 +192,29 @@ func (s *Server) getDevice(c *gin.Context) {
 		writeErr(c, err)
 		return
 	}
+	// next_run is computed for the detail view only: it never reaches the
+	// registry file because it is set on this detached copy.
+	device.NextRun = s.earliestNextRun(device.ID)
 	c.JSON(http.StatusOK, device)
+}
+
+// earliestNextRun returns the next fire time among the device's enabled
+// schedules, or 0 when it has none. The value is serve-time only.
+func (s *Server) earliestNextRun(deviceID string) int64 {
+	if s.schedStore == nil {
+		return 0
+	}
+	var next int64
+	for _, sched := range s.schedStore.All() {
+		if sched.DeviceID != deviceID || !sched.Enabled {
+			continue
+		}
+		fire := enrichSchedule(sched).NextRun
+		if fire > 0 && (next == 0 || fire < next) {
+			next = fire
+		}
+	}
+	return next
 }
 
 func (s *Server) updateDevice(c *gin.Context) {

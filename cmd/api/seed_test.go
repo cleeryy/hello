@@ -22,7 +22,7 @@ func TestSeedDevices(t *testing.T) {
 ]`), 0o600))
 	registry := filepath.Join(dir, "devices.json")
 
-	count, err := seedDevices(registry, src)
+	count, err := seedDevices(registry, src, false)
 	require.NoError(t, err)
 	require.Equal(t, 2, count)
 
@@ -35,15 +35,49 @@ func TestSeedDevices(t *testing.T) {
 	require.Equal(t, "n", got.Notes)
 
 	// Reseeding aborts: existing ids are never overwritten.
-	_, err = seedDevices(registry, src)
+	_, err = seedDevices(registry, src, false)
 	require.Error(t, err)
 	require.Len(t, store.GetAll(), 2)
 
 	// Missing source and invalid JSON fail loudly.
-	_, err = seedDevices(registry, filepath.Join(dir, "nope.json"))
+	_, err = seedDevices(registry, filepath.Join(dir, "nope.json"), false)
 	require.Error(t, err)
 	bad := filepath.Join(dir, "bad.json")
 	require.NoError(t, os.WriteFile(bad, []byte(`[{"id":"x"}]`), 0o600))
-	_, err = seedDevices(registry, bad)
+	_, err = seedDevices(registry, bad, false)
 	require.Error(t, err)
+}
+
+// Given: a non-empty registry and a source file
+// When: seedDevices runs with force=true
+// Then: the target file is rewritten from the source; without the flag the
+// seed still aborts on existing ids.
+func TestSeedDevicesForce(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.json")
+	require.NoError(t, os.WriteFile(src, []byte(`[
+{"id":"pc1","name":"PC 1","mac":"00:11:22:33:44:01"},
+{"id":"pc2","name":"PC 2","mac":"00:11:22:33:44:02"}
+]`), 0o600))
+	registry := filepath.Join(dir, "devices.json")
+
+	count, err := seedDevices(registry, src, false)
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+
+	second := filepath.Join(dir, "second.json")
+	require.NoError(t, os.WriteFile(second, []byte(`[
+{"id":"pc9","name":"PC 9","mac":"00:11:22:33:44:09"}
+]`), 0o600))
+
+	count, err = seedDevices(registry, second, true)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+
+	store, err := storage.New(registry)
+	require.NoError(t, err)
+	require.Len(t, store.GetAll(), 1)
+	got, err := store.Get("pc9")
+	require.NoError(t, err)
+	require.Equal(t, "PC 9", got.Name)
 }

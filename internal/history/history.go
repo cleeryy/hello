@@ -218,18 +218,22 @@ func (h *History) List(deviceID string, limit int) []models.WakeEvent {
 	return h.ListFiltered(Filter{DeviceID: deviceID}, limit)
 }
 
-// Filter selects history entries across device, trigger, result, and time.
-// Zero values disable their dimension; Since/Before are unix seconds.
+// Filter selects history entries across device, trigger, result, time,
+// schedule, and order. Zero values disable their dimension; Since/Before
+// are unix seconds. Order is "asc" or "desc" (default newest-first).
 type Filter struct {
-	DeviceID string
-	Trigger  models.Trigger
-	Success  *bool
-	Since    int64
-	Before   int64
+	DeviceID   string
+	Trigger    models.Trigger
+	Success    *bool
+	Since      int64
+	Before     int64
+	ScheduleID string
+	Order      string
 }
 
-// ListFiltered returns stored entries newest-first matching f.
-// A non-positive limit selects the default page of 50.
+// ListFiltered returns stored entries matching f. Default order is
+// newest-first; Order "asc" returns oldest-first. A non-positive limit
+// selects the default page of 50.
 func (h *History) ListFiltered(f Filter, limit int) []models.WakeEvent {
 	if limit <= 0 {
 		limit = 50
@@ -237,7 +241,7 @@ func (h *History) ListFiltered(f Filter, limit int) []models.WakeEvent {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	out := make([]models.WakeEvent, 0, min(limit, len(h.entries)))
+	matched := make([]models.WakeEvent, 0, len(h.entries))
 	for _, e := range h.entries {
 		if f.DeviceID != "" && e.DeviceID != f.DeviceID {
 			continue
@@ -254,12 +258,20 @@ func (h *History) ListFiltered(f Filter, limit int) []models.WakeEvent {
 		if f.Before != 0 && e.At >= f.Before {
 			continue
 		}
-		out = append(out, e)
-		if len(out) >= limit {
-			break
+		if f.ScheduleID != "" && e.ScheduleID != f.ScheduleID {
+			continue
+		}
+		matched = append(matched, e)
+	}
+	if f.Order == "asc" {
+		for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
+			matched[i], matched[j] = matched[j], matched[i]
 		}
 	}
-	return out
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched
 }
 
 // Purge drops entries recorded strictly before the unix timestamp,

@@ -121,7 +121,8 @@ func (s *Server) writeDryRun(c *gin.Context, mac, broadcast string) {
 }
 
 // parseWakeOptions reads the optional ?note= annotation (or JSON body note)
-// and the ?broadcast= override, falling back to the computed broadcast.
+// and the ?broadcast_ip= override (?broadcast= stays accepted as an alias),
+// falling back to the computed broadcast.
 func parseWakeOptions(c *gin.Context, fallback string) (string, string, bool) {
 	note := strings.TrimSpace(c.Query("note"))
 	if note == "" && c.Request.ContentLength != 0 {
@@ -140,7 +141,11 @@ func parseWakeOptions(c *gin.Context, fallback string) (string, string, bool) {
 		return "", "", false
 	}
 	broadcast := fallback
-	if raw := strings.TrimSpace(c.Query("broadcast")); raw != "" {
+	for _, key := range []string{"broadcast_ip", "broadcast"} {
+		raw := strings.TrimSpace(c.Query(key))
+		if raw == "" {
+			continue
+		}
 		ip := net.ParseIP(raw)
 		if ip == nil || ip.To4() == nil {
 			writeProblem(c, http.StatusUnprocessableEntity, "unprocessable entity",
@@ -148,6 +153,7 @@ func parseWakeOptions(c *gin.Context, fallback string) (string, string, bool) {
 			return "", "", false
 		}
 		broadcast = raw
+		break
 	}
 	return note, broadcast, true
 }
